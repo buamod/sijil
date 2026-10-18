@@ -29,6 +29,8 @@ struct ClipListView: View {
   let onPreview: (ClipItem) -> Void
   let onFile: (ClipItem, UUID?) -> Void
   let onToggleLock: (ClipItem) -> Void
+  /// Deletes everything except locked items.
+  let onClearHistory: () -> Void
   /// Why the last copy was skipped, if it was.
   var rejection: CaptureRules.Rejection?
 
@@ -120,6 +122,15 @@ struct ClipListView: View {
       Text("\(model.items.count) items")
         .font(.caption)
         .foregroundStyle(.secondary)
+      if model.items.count > 0 {
+        // Destructive, and permanent, so it confirms. It is also a *delete*, not
+        // a prune: the tombstones it writes are what stop the other machines in
+        // the vault from re-importing everything just cleared.
+        Button("Clear History…") { confirmingClear = true }
+          .font(.caption)
+          .buttonStyle(.plain)
+          .foregroundStyle(.secondary)
+      }
       Spacer()
       if let rejection = rejectionText {
         Text(rejection)
@@ -132,7 +143,22 @@ struct ClipListView: View {
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 6)
+    .confirmationDialog(
+      "Delete all clipboard history?",
+      isPresented: $confirmingClear,
+      titleVisibility: .visible
+    ) {
+      Button("Clear History", role: .destructive) { onClearHistory() }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      Text(
+        "Locked items are kept. This cannot be undone, and it removes the items "
+          + "from every machine syncing this vault."
+      )
+    }
   }
+
+  @State private var confirmingClear = false
 
   /// Explains why the most recent copy was not recorded, so a skipped clip is
   /// answerable rather than mysterious.

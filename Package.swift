@@ -29,5 +29,13 @@ let package = Package(
       name: "CopyzCoreTests",
       dependencies: ["CopyzCore", "CopyzPaste"]
     ),
+    // App-layer logic is where the wiring bugs live: a setting that is stored
+    // but never applied, a service that half-connects. Testing it needs the
+    // executable target's code, which SwiftPM cannot import directly, so the
+    // app logic lives in the target and is exercised through `@testable`.
+    .testTarget(
+      name: "CopyzAppTests",
+      dependencies: ["CopyzApp", "CopyzCore", "CopyzPaste"]
+    ),
   ]
 )

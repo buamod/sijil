@@ -59,6 +59,30 @@ public final class ClipboardService {
     }
   }
 
+  /// Test seam: every path supplied explicitly.
+  ///
+  /// The default initialiser reaches into Application Support, which makes the
+  /// service impossible to exercise without trampling the user's real history.
+  /// The monitoring half is deliberately left unwired here — tests drive
+  /// `store` directly rather than going through a live pasteboard.
+  init(
+    settings: Settings,
+    store: SQLiteClipStore,
+    vault: VaultStore,
+    collections: CollectionStore,
+    sidecarURL: URL
+  ) {
+    self.settings = settings
+    self.store = store
+    self.vault = vault
+    self.collections = collections
+    self.sidecarURL = sidecarURL
+    self.monitor = PasteboardMonitor(
+      configuration: .init(pollInterval: settings.pollInterval),
+      rules: settings.rules
+    )
+  }
+
   public func start() async {
     monitor.updateConfiguration(.init(pollInterval: settings.pollInterval))
 
@@ -77,12 +101,17 @@ public final class ClipboardService {
 
     await refreshCollectionNames()
     reload()
+    // Wires up the Settings maintenance buttons. Must happen after the service
+    // is otherwise initialised, or a queued command could hit a half-built
+    // vault.
+    observeMaintenanceCommands()
     monitor.start()
     scheduleMaintenance()
   }
 
   public func stop() async {
     monitor.stop()
+    removeMaintenanceObservers()
     await vault.flushOnShutdown()
   }
 
@@ -308,16 +337,23 @@ public final class ClipboardService {
     }
   }
 
-  public func clearAll(includingPinned: Bool) {
+  /// Deletes history.
+  ///
+  /// `async` on purpose: the sidecar write must be awaited, not fired into a
+  /// detached `Task`. Otherwise quitting the app immediately after clearing
+  /// leaves tombstones unwritten, and every other machine's vault re-imports
+  /// exactly what the user just deleted.
+  public func clearAll(includingPinned: Bool) async {
     // A user clearing history is a deliberate delete, so it tombstones: without
     // that, every other machine's vault would re-import what was just cleared.
     let removed = (try? store.deleteAll(includingPinned: includingPinned, tombstone: true)) ?? []
-    Task {
-      for id in removed {
-        await collections.tombstone(id)
-      }
-      try? await collections.save()
+    for id in removed {
+      await collections.tombstone(id)
     }
+    // Publish our own acknowledgement too, or the first collection round would
+    // be blocked by our own watermark.
+    await collections.acknowledgeDeletions()
+    await persistCollections()
     reload()
   }
 
@@ -354,8 +390,65 @@ public final class ClipboardService {
     }
   }
 
-  public func flushVault() async {
+  /// Writes everything pending to the vault. Returns how many notes were written,
+  /// which is zero when the vault is unreachable.
+  @discardableResult
+  public func flushVault() async -> Int {
     await vault.flushNow()
+  }
+
+  /// Reclaims space and merges the search index, regardless of how much is at
+  /// stake. The automatic pass is threshold-based because `VACUUM` needs an
+  /// exclusive lock; an explicit request from the user is unconditional.
+  public func compactDatabase() {
+    do {
+      let reclaimed = try store.compact(force: true)
+      log.info("manual compaction reclaimed \(reclaimed) pages")
+      reload()
+    } catch {
+      log.error("compaction failed: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  /// Observes the maintenance commands posted by the Settings buttons.
+  ///
+  /// Tokens are retained and the observers removed on `stop()`. Registering
+  /// without keeping them means a second `start()` silently doubles every
+  /// handler, so one flush becomes two and one rebuild becomes two — the kind of
+  /// bug that only shows up after a restart and never reproduces in isolation.
+  ///
+  /// Called once at startup. The buttons used to post notifications that nothing
+  /// was listening for, so they silently did nothing; a `NotificationCenter`
+  /// round trip has no compiler checking to catch that.
+  public func observeMaintenanceCommands() {
+    // Idempotent: a second `start()` must not leave the first registration in
+    // place alongside the new one.
+    removeMaintenanceObservers()
+    let center = NotificationCenter.default
+    maintenanceObservers = [
+      .copyzFlushVault, .copyzRebuildVault, .copyzCompact,
+    ].map { name in
+      center.addObserver(forName: name, object: nil, queue: .main) {
+        [weak self] _ in
+        guard let self else { return }
+        Task { @MainActor in
+          switch name {
+          case .copyzFlushVault: await self.flushVault()
+          case .copyzRebuildVault: await self.rebuildFromVault()
+          default: self.compactDatabase()
+          }
+        }
+      }
+    }
+  }
+
+  private var maintenanceObservers: [NSObjectProtocol] = []
+
+  private func removeMaintenanceObservers() {
+    for observer in maintenanceObservers {
+      NotificationCenter.default.removeObserver(observer)
+    }
+    maintenanceObservers = []
   }
 
   public func skipNextCopy() {
@@ -386,6 +479,15 @@ public final class ClipboardService {
       _ = try store.prune(policy: settings.retention)
       _ = await vault.flushNow()
       _ = await vault.importFromVault()
+      // Deletions only become collectable once every replica has seen them.
+      // Running this here rather than at delete time means a peer that was
+      // offline still blocks collection when it matters.
+      await collections.acknowledgeDeletions()
+      _ = await collections.collectAcknowledgedTombstones()
+      await persistCollections()
+      // Reclaims the pages freed by pruning and merges FTS segments. Skipped
+      // automatically unless enough is at stake to justify the exclusive lock.
+      try store.compactIfNeeded()
       reload()
     } catch {
       log.error("maintenance failed: \(error.localizedDescription, privacy: .public)")

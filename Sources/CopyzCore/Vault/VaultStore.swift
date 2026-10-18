@@ -42,6 +42,10 @@ public actor VaultStore {
     self.debounce = debounce
   }
 
+  /// The underlying writer. Exposed so durability tests can publish a file
+  /// directly and observe the exact bytes on disk.
+  nonisolated public var rawWriter: VaultWriter { writer }
+
   public func prepare() async throws {
     try await writer.prepare()
   }
@@ -109,8 +113,18 @@ public actor VaultStore {
   public func importFromVault() async -> Int {
     let decoded = await writer.readAll(limit: 20_000)
     var imported = 0
+    // Every note present on disk, including ones we skipped. A note we did not
+    // import still exists, so it must count as "present" for the
+    // missing-note check below.
+    var presentOnDisk: Set<UUID> = []
 
     for note in decoded {
+      presentOnDisk.insert(note.id)
+
+      // A note from a newer copyz may interpret our fields differently, so it
+      // is not imported.
+      guard note.schema <= VaultNote.schemaVersion else { continue }
+
       guard !onDisk.contains(note.id.uuidString) else { continue }
       do {
         // A note for a clip deleted elsewhere must not come back. The vault is
@@ -120,7 +134,7 @@ public actor VaultStore {
           continue
         }
 
-        if try store.isTombstoned(note.id) {
+        if store.isTombstoned(note.id) {
           onDisk.insert(note.id.uuidString)
           continue
         }
@@ -142,6 +156,9 @@ public actor VaultStore {
           )],
           pinned: note.pinned,
           locked: note.locked,
+          // Imported items never carry resurrection rights, so they cannot
+          // clear a tombstone.
+          isFromLocalCapture: false,
           collection: note.collection,
           useCount: note.useCount,
           title: TextSanitizer.previewLine(note.body)
@@ -149,13 +166,43 @@ public actor VaultStore {
         // Already marked exported: it came *from* the vault.
         _ = try store.record(item)
         try store.markExported(ids: [item.id])
-        onDisk.insert(item.id.uuidString)
+        onDisk.insert(note.id.uuidString)
         imported += 1
       } catch {
         log.error("import failed for \(note.id.uuidString, privacy: .public)")
       }
     }
+
+    // Anything we hold that no longer has a note on disk gets re-published. The
+    // import above only adds what is present, so this is the other direction.
+    //
+    // A missing note is not a deletion — it means the file went away behind our
+    // back (a sync client, a cleanup, an unmounted volume) — so the clip is
+    // re-published rather than dropped.
+    let missing = (try? missingNoteIDs(present: presentOnDisk)) ?? []
+    if !missing.isEmpty {
+      try? store.rearmExport(ids: missing)
+    }
+
+    // A tombstone whose note is gone has nothing left to block, so it can be
+    // collected. Gated on readability: an unreachable vault reports zero notes,
+    // and collecting on that basis would resurrect every deleted clip the moment
+    // the vault came back.
+    _ = try? store.collectTombstonesWithNoNote(
+      presentOnDisk: Set(presentOnDisk.map(\.uuidString)),
+      isVaultReadable: await writer.isReachable()
+    )
     return imported
+  }
+
+  /// Ids we hold in SQLite with no note on disk to back them up.
+  private func missingNoteIDs(present: Set<UUID>) throws -> [UUID] {
+    // Only local captures are re-armed: an imported item has no local
+    // obligation to re-publish.
+    let known = try store.recent(limit: 100_000, includeUnpinnedOnly: false)
+    return known
+      .filter { $0.isFromLocalCapture && !present.contains($0.id) }
+      .map(\.id)
   }
 
   /// Rebuilds the index from the vault. Safe to run at any time; the caller is

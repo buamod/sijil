@@ -67,6 +67,13 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
   public var locked: Bool
   /// Set once this clip has been deleted, so a vault import cannot resurrect it.
   public var tombstoned: Bool
+  /// True only for items captured from the live pasteboard by the user.
+  ///
+  /// Vault import is read-only and cannot be trusted with resurrection rights,
+  /// so it sets this false. A local capture setting it true is what allows
+  /// re-copying previously deleted content, which is a legitimate new event
+  /// rather than an undo of the delete.
+  public var isFromLocalCapture: Bool
   public var collection: String?
   public var useCount: Int
   /// Cached, sanitized single-line preview. Recomputed on write; never trusted
@@ -83,6 +90,7 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
     pinned: Bool = false,
     locked: Bool = false,
     tombstoned: Bool = false,
+    isFromLocalCapture: Bool = true,
     collection: String? = nil,
     useCount: Int = 1,
     title: String? = nil
@@ -96,6 +104,7 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
     self.pinned = pinned
     self.locked = locked
     self.tombstoned = tombstoned
+    self.isFromLocalCapture = isFromLocalCapture
     self.collection = collection
     self.useCount = useCount
     self.title = title ?? Self.makeTitle(from: contents)

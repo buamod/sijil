@@ -42,6 +42,16 @@ public struct CaptureRules: Sendable, Equatable, Codable {
   public var capturesImages: Bool = true
   /// Ignore copies arriving over Universal Clipboard / Handoff.
   public var ignoresUniversalClipboard: Bool = true
+  /// Drop text that looks like a credential.
+  ///
+  /// On by default and applied before the clip reaches disk, because a
+  /// clipboard manager is the one program guaranteed to be running when you
+  /// copy a password. Turning it off means copies from every password manager
+  /// that does not set the macOS privacy marker are kept in plain text.
+  public var detectsSecrets: Bool = true
+  /// Extra bundle identifiers to skip, on top of the built-in
+  /// password-manager list.
+  public var extraIgnoredApps: Set<String> = []
 
   public init() {}
 
@@ -56,6 +66,8 @@ public struct CaptureRules: Sendable, Equatable, Codable {
     case typeIgnored(String)
     case patternMatched
     case imagesDisabled
+    case secretDetected(SecretDetector.Kind)
+    case passwordManager(String)
 
     public var description: String {
       switch self {
@@ -67,6 +79,8 @@ public struct CaptureRules: Sendable, Equatable, Codable {
       case .typeIgnored(let t): "Ignored pasteboard type: \(t)"
       case .patternMatched: "Matched an ignore pattern"
       case .imagesDisabled: "Image capture is disabled"
+      case .secretDetected(let kind): "Looks like \(kind.description)"
+      case .passwordManager(let bundle): "From a password manager: \(bundle)"
       }
     }
   }
@@ -98,7 +112,14 @@ public struct CaptureRules: Sendable, Equatable, Codable {
     if !capturesImages, isImageOnly(types) { return .imagesDisabled }
 
     if let bundleID {
+      // Password managers are checked before the user's own ignore list: their
+      // copies are credentials essentially without exception, and a user who
+      // explicitly allowlisted one should still not have its output stored.
+      if detectsSecrets, SecretDetector.passwordManagerBundleIDs.contains(bundleID) {
+        return .passwordManager(bundleID)
+      }
       if ignoredApps.contains(bundleID) { return .appIgnored(bundleID) }
+      if extraIgnoredApps.contains(bundleID) { return .appIgnored(bundleID) }
       if !allowedApps.isEmpty, !allowedApps.contains(bundleID) {
         return .notAllowlisted(bundleID)
       }
@@ -109,6 +130,13 @@ public struct CaptureRules: Sendable, Equatable, Codable {
     }
 
     if let text, !text.isEmpty, patterns.matches(text) { return .patternMatched }
+
+    // Last, and on text only. A binary payload cannot be pattern-matched, so a
+    // secret copied as an image is not detectable here — which is also why the
+    // password-manager bundle check runs first and does not depend on content.
+    if detectsSecrets, let text, !text.isEmpty, let kind = SecretDetector().detect(in: text) {
+      return .secretDetected(kind)
+    }
 
     return nil
   }

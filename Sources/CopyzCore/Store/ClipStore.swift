@@ -43,10 +43,25 @@ public protocol ClipStore: Sendable {
   /// Drops tombstones older than `date`. Returns how many were removed.
   @discardableResult
   func pruneTombstones(olderThan date: Date) throws -> Int
+  /// Drops local tombstones for clips that have no note in the vault.
+  ///
+  /// `isVaultReadable` must be true: an unreachable vault also reports no notes,
+  /// and collecting on that basis would erase every tombstone, resurrecting
+  /// deleted clips as soon as the vault returned.
+  func collectTombstonesWithNoNote(
+    presentOnDisk: Set<String>,
+    isVaultReadable: Bool
+  ) throws -> Int
 
   /// Rows never yet written to the vault, oldest first.
   func pendingExport(limit: Int) throws -> [ClipItem]
   func markExported(ids: [UUID], at date: Date) throws
+  /// Re-arms the export obligation for rows whose vault note has gone missing.
+  ///
+  /// A note can vanish without a tombstone — a sync client, a user cleaning up
+  /// files, or an unmounted volume. That is not a deletion, so the clip stays
+  /// and simply gets re-published.
+  func rearmExport(ids: [UUID]) throws
 
   /// Applies retention. Returns the ids that were removed.
   func prune(policy: RetentionPolicy, now: Date) throws -> [UUID]

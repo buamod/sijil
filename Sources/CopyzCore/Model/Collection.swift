@@ -50,6 +50,43 @@ public struct Collection: Sendable, Identifiable, Equatable, Codable {
   ]
 }
 
+/// Stable identity for this installation, published so other replicas can tell
+/// who has seen what.
+///
+/// Tombstone collection cannot use a wall-clock TTL: a replica that is offline
+/// longer than the TTL would resurrect a deleted clip when it returns. A
+/// tombstone may only be collected once every known replica has acknowledged
+/// observing the deletion, which requires knowing who exists.
+public struct DeviceIdentity: Sendable, Equatable, Codable {
+  public var id: UUID
+  /// ISO 8601, so a human reading the sidecar can tell when a device was last
+  /// active.
+  public var lastSeenAt: Date
+
+  public init(id: UUID = UUID(), lastSeenAt: Date = Date()) {
+    self.id = id
+    self.lastSeenAt = lastSeenAt
+  }
+}
+
+/// One replica's acknowledgement progress.
+///
+/// `observedTombstones` is the high-water mark of tombstones this device has
+/// seen in the shared sidecar. GC may only collect a tombstone once every known
+/// device's mark has passed it.
+public struct DeviceWatermark: Sendable, Equatable, Codable {
+  public var deviceID: UUID
+  /// Logical timestamp of the newest deletion this device has observed.
+  public var observedDeletes: Date
+  public var updatedAt: Date
+
+  public init(deviceID: UUID, observedDeletes: Date, updatedAt: Date = Date()) {
+    self.deviceID = deviceID
+    self.observedDeletes = observedDeletes
+    self.updatedAt = updatedAt
+  }
+}
+
 /// Pin state, kept separate from the clip body.
 ///
 /// Pinned flags are the one piece of clip metadata that changes after the fact,
@@ -78,8 +115,28 @@ public struct VaultSidecar: Sendable, Equatable, Codable {
   public var pins: [UUID: PinRecord] = [:]
   /// Deletions, keyed by clip id and timestamped so the newest wins on merge.
   public var tombstoneDates: [UUID: Date] = [:]
+  /// This installation, so peers can include it in acknowledgement tracking.
+  public var identity: DeviceIdentity?
+  /// One entry per replica that has reported progress.
+  public var watermarks: [UUID: DeviceWatermark] = [:]
 
   public init() {}
+
+  /// Bumped whenever garbage collection runs.
+  ///
+  /// A replica whose recorded epoch is older than the current one has missed a
+  /// collection round and therefore cannot be trusted to still hold every
+  /// deletion — its local-only items are "needs review" rather than re-pushed.
+  public var epoch: Int = 1
+  /// The epoch each device last saw, so a returning replica can detect it fell
+  /// behind.
+  public var deviceEpochs: [UUID: Int] = [:]
+
+  /// This installation's identity, created on first use.
+  ///
+  /// A mutating accessor on a value type, so it lives on `CollectionStore`
+  /// rather than here; this returns the recorded id if one exists.
+  public var recordedDeviceID: UUID? { identity?.id }
 
   public mutating func apply(_ record: PinRecord) {
     // Last writer wins, so an older sync from another machine cannot undo a
@@ -122,6 +179,9 @@ public actor CollectionStore {
       self.sidecar = VaultSidecar()
     }
   }
+
+  /// Where the sidecar is written, if it has a location.
+  public var sidecarURL: URL? { fileURL }
 
   // MARK: - Collections
 
@@ -240,6 +300,16 @@ public actor CollectionStore {
     for (id, date) in incoming.tombstoneDates {
       tombstone(id, at: date)
     }
+    // Adopt peers' watermarks and epochs so collection knows who has seen what.
+    for (device, watermark) in incoming.watermarks where device != sidecar.recordedDeviceID {
+      if let existing = sidecar.watermarks[device],
+         existing.updatedAt > watermark.updatedAt { continue }
+      sidecar.watermarks[device] = watermark
+    }
+    for (device, epoch) in incoming.deviceEpochs {
+      sidecar.deviceEpochs[device] = max(sidecar.deviceEpochs[device] ?? 0, epoch)
+    }
+    sidecar.epoch = max(sidecar.epoch, incoming.epoch)
   }
 
   // MARK: - Tombstones
@@ -249,6 +319,15 @@ public actor CollectionStore {
   /// The vault is never rewritten, so a delete has to travel as metadata or
   /// the note still sitting in the synced folder would be re-imported forever.
   /// Timestamped so the newest delete always wins, matching the pin merge.
+  /// This installation's stable identity, created on first use and persisted so
+  /// peers can include it in acknowledgement tracking.
+  public var deviceID: UUID {
+    if let recorded = sidecar.recordedDeviceID { return recorded }
+    let created = DeviceIdentity()
+    sidecar.identity = created
+    return created.id
+  }
+
   public func tombstone(_ clipID: UUID, at date: Date = Date()) {
     if let existing = sidecar.tombstoneDates[clipID], existing > date { return }
     sidecar.tombstoneDates[clipID] = date
@@ -260,10 +339,105 @@ public actor CollectionStore {
 
   public var tombstones: Set<UUID> { Set(sidecar.tombstoneDates.keys) }
 
-  /// Drops tombstones older than `date`, so the sidecar cannot grow forever.
-  public func pruneTombstones(olderThan date: Date) {
+  // MARK: - Acknowledgement and safe GC
+
+  /// Publishes this device and records that it has seen every tombstone
+  /// currently in the sidecar.
+  ///
+  /// Called on launch and after import. This is what makes tombstone
+  /// collection safe: a tombstone is only eligible once *every* known device has
+  /// acknowledged passing it.
+  public func acknowledgeDeletions() {
+    let me = deviceID
+    sidecar.identity?.lastSeenAt = Date()
+    let newest = sidecar.tombstoneDates.values.max() ?? .distantPast
+    let existing = sidecar.watermarks[me]
+    sidecar.watermarks[me] = DeviceWatermark(
+      deviceID: me,
+      observedDeletes: max(existing?.observedDeletes ?? .distantPast, newest),
+      updatedAt: Date()
+    )
+    sidecar.deviceEpochs[me] = sidecar.epoch
+  }
+
+  /// Devices other than this one.
+  public var knownDevices: Set<UUID> {
+    Set(sidecar.watermarks.keys).union(sidecar.deviceEpochs.keys).subtracting([deviceID])
+  }
+
+  /// Whether `clipID`'s tombstone may be collected.
+  ///
+  /// Requires every known replica to have acknowledged a deletion at least as
+  /// new as this one. A device that has never reported is treated as blocking,
+  /// which is the safe direction: an over-long tombstone is harmless, a
+  /// prematurely-collected one resurrects deleted data.
+  public func canCollect(_ clipID: UUID, now: Date = Date()) -> Bool {
+    guard let deletedAt = sidecar.tombstoneDates[clipID] else { return false }
+
+    let silent = sidecar.retireDevices(silentSince: now, excluding: deviceID)
+    for device in knownDevices {
+      // A device retired as stale no longer blocks collection, but the epoch
+      // bump means it will not silently re-push old items when it returns.
+      if silent.contains(device) { continue }
+      guard let watermark = sidecar.watermarks[device] else { return false }
+      guard watermark.observedDeletes >= deletedAt else { return false }
+    }
+    return true
+  }
+
+  /// Collects tombstones every replica has acknowledged observing.
+  ///
+  /// Replaces the previous age-based prune, which was unsound: a replica
+  /// offline longer than the TTL would resurrect a deleted clip on return.
+  /// @discardableResult so tests can assert how many were collected.
+  @discardableResult
+  public func collectAcknowledgedTombstones(now: Date = Date()) -> Int {
+    let before = sidecar.tombstoneDates.count
+    sidecar.tombstoneDates = sidecar.tombstoneDates.filter { !canCollect($0.key, now: now) }
+    let removed = before - sidecar.tombstoneDates.count
+    // Any collection round invalidates earlier acknowledgements.
+    if removed > 0 {
+      sidecar.epoch += 1
+      sidecar.deviceEpochs[deviceID] = sidecar.epoch
+    }
+    return removed
+  }
+
+  /// Drops tombstones older than `date`.
+  ///
+  /// Retained for the single-machine case, where there are no peers to wait for
+  /// and an age bound is unambiguous. Never use it when peers exist.
+  @discardableResult
+  public func pruneTombstones(olderThan date: Date) -> Int {
+    let before = sidecar.tombstoneDates.count
     sidecar.tombstoneDates = sidecar.tombstoneDates.filter { $0.value > date }
+    return before - sidecar.tombstoneDates.count
+  }
+
+  /// Whether this device has fallen behind a collection round.
+  public func hasFallenBehind() -> Bool {
+    let recorded = sidecar.deviceEpochs[deviceID] ?? sidecar.epoch
+    return recorded < sidecar.epoch
   }
 
   public var allPins: [UUID: PinRecord] { sidecar.pins }
+}
+
+extension VaultSidecar {
+  /// Devices with no recent activity, retired so they stop blocking collection.
+  ///
+  /// A retired device does not silently return with stale data: the epoch bump
+  /// on collection means it is told it fell behind, and its local-only items are
+  /// treated as needing review rather than re-pushed.
+  func retireDevices(silentSince now: Date, excluding me: UUID) -> Set<UUID> {
+    let cutoff = now.addingTimeInterval(-Self.retirementInterval)
+    let stale = watermarks.values
+      .filter { $0.updatedAt < cutoff && $0.deviceID != me }
+      .map(\.deviceID)
+    return Set(stale)
+  }
+
+  /// How long a replica may be silent before it stops blocking tombstone
+  /// collection. Six weeks covers a laptop that is simply closed.
+  static let retirementInterval: TimeInterval = 60 * 24 * 3600
 }

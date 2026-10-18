@@ -40,8 +40,9 @@ public actor VaultWriter {
 
   public var url: URL { rootURL }
 
-  /// Creates the directory skeleton, including the vault root itself. Cheap and
-  /// idempotent, so it is safe on every launch.
+  /// Creates the directory skeleton, including the vault root itself, and clears
+  /// any temporary files a previous crash left behind. Cheap and idempotent, so
+  /// it is safe on every launch.
   ///
   /// Creating the root here matters: the caller may point the vault at a folder
   /// that does not exist yet on first run, and a bare existence check would
@@ -68,6 +69,8 @@ public actor VaultWriter {
       at: rootURL.appending(path: "assets", directoryHint: .isDirectory),
       withIntermediateDirectories: true
     )
+
+    Durability.sweepTemporaries(in: rootURL, fileManager: fileManager)
   }
 
   /// True when the vault folder is still reachable. Checked before each export
@@ -80,6 +83,11 @@ public actor VaultWriter {
   }
 
   /// Writes one clip. Returns the note's relative path.
+  ///
+  /// Publication is durable: bytes go to a temporary file in the same
+  /// directory, are flushed to disk, then renamed into place. A sync client or
+  /// a concurrent reader therefore only ever observes a complete note, and a
+  /// crash leaves either the old file or the new one — never a truncated one.
   @discardableResult
   public func write(_ item: ClipItem) throws -> String {
     guard isReachable() else { throw Failure.rootMissing(rootURL) }
@@ -94,7 +102,7 @@ public actor VaultWriter {
       let assetURL = rootURL.appending(path: "assets/\(assetName)")
       if !fileManager.fileExists(atPath: assetURL.path) {
         do {
-          try data.write(to: assetURL, options: [.atomic])
+          try Durability.write(data, to: assetURL)
         } catch {
           log.error("asset write failed: \(error.localizedDescription, privacy: .public)")
           throw Failure.writeFailed(assetURL, underlying: error)
@@ -106,10 +114,8 @@ public actor VaultWriter {
       at: noteURL.deletingLastPathComponent(),
       withIntermediateDirectories: true
     )
-    let note = VaultNote.encode(item)
     do {
-      // Atomic so a sync client never observes a half-written note.
-      try Data(note.utf8).write(to: noteURL, options: [.atomic])
+      try Durability.write(Data(VaultNote.encode(item).utf8), to: noteURL)
     } catch {
       log.error("note write failed: \(error.localizedDescription, privacy: .public)")
       throw Failure.writeFailed(noteURL, underlying: error)

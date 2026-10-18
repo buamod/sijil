@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 /// SQLite-backed history store.
 ///
@@ -11,6 +12,7 @@ import GRDB
 /// code snippets are findable — word-prefix matching misses `createTab` when
 /// the user only remembers `createTable`.
 public final class SQLiteClipStore: ClipStore {
+  private static let log = Logger(subsystem: "app.copyz", category: "store")
   /// `DatabaseWriter` is `DatabaseReader`'s refinement, so this covers both the
   /// on-disk pool (concurrent WAL readers) and the in-memory queue used by
   /// tests.
@@ -35,6 +37,14 @@ public final class SQLiteClipStore: ClipStore {
       try db.execute(sql: "PRAGMA journal_mode = WAL")
       try db.execute(sql: "PRAGMA synchronous = NORMAL")
       try db.execute(sql: "PRAGMA foreign_keys = ON")
+      // Overwrite deleted content rather than leaving it recoverable in freed
+      // pages. Without this, a deleted clip's text survives in the database file
+      // and the WAL — the exact residue a clipboard manager should not keep.
+      // Costs extra page writes, which is an acceptable trade for a privacy
+      // guarantee.
+      try db.execute(sql: "PRAGMA secure_delete = ON")
+      // A second process must wait rather than fail instantly with SQLITE_BUSY.
+      try db.execute(sql: "PRAGMA busy_timeout = 5000")
     }
     let pool = try DatabasePool(path: path, configuration: config)
     try Self.migrator.migrate(pool)
@@ -198,51 +208,39 @@ public final class SQLiteClipStore: ClipStore {
 
   /// Re-reads one row inside an open write transaction, so callers observe the
   /// post-UPDATE state rather than the snapshot they already held.
-  private func reload(_ id: String, in db: Database) throws -> ClipItem {
-    let row = try ClipRow
-      .filter(Column("id") == id)
-      .fetchOne(db)
-    guard let row else {
-      // Cannot happen: the caller only reaches here with an id it just wrote.
-      struct Vanished: Error {}
-      throw Vanished()
-    }
-    return try hydrate(row, in: db)
-  }
-
   // MARK: - ClipStore
 
   public func record(_ item: ClipItem) throws -> ClipItem {
     let hash = item.contentHash
 
     return try pool.write { db in
-      // Same content already stored — bump usage rather than duplicate.
-      if let existing = try ClipRow
-        .filter(Column("content_hash") == hash)
-        .fetchOne(db)
-      {
-        try db.execute(
-          sql: "UPDATE clip SET last_used_at = ?, use_count = use_count + 1 WHERE rowid_pk = ?",
-          arguments: [item.lastUsedAt.timeIntervalSince1970, existing.rowidPK]
-        )
-        // Re-read so the caller sees the incremented use count rather than the
-        // pre-update snapshot.
-        return try self.reload(existing.id, in: db)
-      }
-
-      // A tombstoned clip must never come back. Vault import is read-only by
-      // design, so without this check a delete on one machine is silently
-      // undone by the note still sitting in every other machine's vault.
+      // A tombstoned clip must not come back through the vault, but a *fresh
+      // local capture* of the same content is a new event the user deliberately
+      // made. Vault import therefore clears the tombstone first, and only a
+      // genuine local capture can resurrect the content.
+      //
+      // Vault import is read-only by design, so without the tombstone check a
+      // delete on one machine is silently undone by the note still sitting in
+      // every other machine's vault.
       if try isTombstonedIn(item.id.uuidString, in: db) {
-        return item
+        guard item.isFromLocalCapture else { return item }
+        try db.execute(
+          sql: "DELETE FROM clip_tombstone WHERE id = ?",
+          arguments: [item.id.uuidString]
+        )
       }
 
+      // Upsert rather than select-then-insert. The check and the insert happen
+      // in one statement, so the decision cannot be invalidated between them.
       try db.execute(
         sql: """
           INSERT INTO clip
             (id, content_hash, created_at, last_used_at, source_bundle_id,
              source_app_name, pinned, locked, collection, use_count, title, kind, exported_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+          ON CONFLICT(content_hash) DO UPDATE SET
+            last_used_at = excluded.last_used_at,
+            use_count = clip.use_count + 1
           """,
         arguments: [
           item.id.uuidString, hash,
@@ -252,21 +250,55 @@ public final class SQLiteClipStore: ClipStore {
           item.title, item.kind.rawValue,
         ]
       )
-      let rowidPK = try Int64.fetchOne(db, sql: "SELECT last_insert_rowid()")!
 
-      for content in item.contents {
+      let row = try ClipRow
+        .filter(Column("content_hash") == hash)
+        .fetchOne(db)
+      guard let row else {
+        struct MissingAfterUpsert: Error {}
+        throw MissingAfterUpsert()
+      }
+
+      // Only write content and search rows when this is a genuinely new clip;
+      // an upsert that matched an existing row must not duplicate them.
+      if !exists(clipID: row.id, contents: item.contents, in: db) {
         try db.execute(
-          sql: "INSERT INTO clip_content (clip_id, type, value) VALUES (?, ?, ?)",
-          arguments: [item.id.uuidString, content.type, content.value]
+          sql: "DELETE FROM clip_content WHERE clip_id = ?",
+          arguments: [row.id]
+        )
+        for content in item.contents {
+          try db.execute(
+            sql: "INSERT INTO clip_content (clip_id, type, value) VALUES (?, ?, ?)",
+            arguments: [row.id, content.type, content.value]
+          )
+        }
+        try db.execute(
+          sql: "DELETE FROM clip_fts WHERE clip_rowid = ?",
+          arguments: [row.rowidPK]
+        )
+        try db.execute(
+          sql: "INSERT INTO clip_fts (title, body, clip_rowid) VALUES (?, ?, ?)",
+          arguments: [item.title, item.vaultBody, row.rowidPK]
         )
       }
 
-      try db.execute(
-        sql: "INSERT INTO clip_fts (title, body, clip_rowid) VALUES (?, ?, ?)",
-        arguments: [item.title, item.vaultBody, rowidPK]
-      )
-      return item
+      return try self.hydrate(row, in: db)
     }
+  }
+
+  /// Whether this exact set of representations is already stored for `clipID`.
+  private func exists(
+    clipID: String,
+    contents: [ClipContent],
+    in db: Database
+  ) -> Bool {
+    let stored = (try? ContentRow
+      .filter(Column("clip_id") == clipID)
+      .fetchAll(db)) ?? []
+    guard stored.count == contents.count, !stored.isEmpty else { return false }
+    let storedSet = Set(stored.map { "\($0.type):\(Digest.hex($0.value))" })
+    let incomingSet = Set(contents.map { "\($0.type):\(Digest.hex($0.value))" })
+    return storedSet == incomingSet
   }
 
   public func item(id: UUID) throws -> ClipItem? {
@@ -367,6 +399,16 @@ public final class SQLiteClipStore: ClipStore {
     (try? pool.read { db in try isTombstonedIn(id.uuidString, in: db) }) ?? false
   }
 
+  /// Clears a clip's tombstone, so the content can be captured again.
+  ///
+  /// Deliberately separate from `tombstone(_:at:)`: re-copying something you
+  /// previously deleted is a legitimate new capture event, not a resurrection.
+  public func clearTombstone(_ id: UUID) throws {
+    try pool.write { db in
+      try db.execute(sql: "DELETE FROM clip_tombstone WHERE id = ?", arguments: [id.uuidString])
+    }
+  }
+
   public func tombstoneCount() throws -> Int {
     try pool.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clip_tombstone") ?? 0 }
   }
@@ -379,6 +421,40 @@ public final class SQLiteClipStore: ClipStore {
         arguments: [date.timeIntervalSince1970]
       )
       return db.changesCount
+    }
+  }
+
+  /// Drops tombstones for clips that have no note left in the vault.
+  ///
+  /// A local tombstone exists for exactly one reason: to stop `importFromVault`
+  /// resurrecting a clip whose note is still sitting in the synced folder. Once
+  /// no note exists on this machine, there is nothing left to resurrect and the
+  /// row is dead weight.
+  ///
+  /// This is deliberately *not* age-based. Age is not evidence that a replica
+  /// has seen the delete, so a TTL here would resurrect deleted data for any
+  /// machine that was offline longer than it. Soundness comes from absence of
+  /// the note, not from the passage of time.
+  ///
+  /// `isVaultReadable` must be true. An unreachable vault also reports zero
+  /// notes, and collecting on that basis would erase every tombstone — at
+  /// exactly the moment the vault comes back, deleted clips would return.
+  @discardableResult
+  public func collectTombstonesWithNoNote(
+    presentOnDisk: Set<String>,
+    isVaultReadable: Bool
+  ) throws -> Int {
+    guard isVaultReadable else { return 0 }
+    return try pool.write { db in
+      let candidates = try String.fetchAll(db, sql: "SELECT id FROM clip_tombstone")
+      let stale = candidates.filter { !presentOnDisk.contains($0) }
+      guard !stale.isEmpty else { return 0 }
+      let placeholders = Array(repeating: "?", count: stale.count).joined(separator: ",")
+      try db.execute(
+        sql: "DELETE FROM clip_tombstone WHERE id IN (\(placeholders))",
+        arguments: StatementArguments(stale)
+      )
+      return stale.count
     }
   }
 
@@ -482,6 +558,8 @@ public final class SQLiteClipStore: ClipStore {
     }
   }
 
+  /// Clears the pending-export flag, i.e. records that the vault already has
+  /// this clip.
   public func markExported(ids: [UUID], at date: Date = Date()) throws {
     guard !ids.isEmpty else { return }
     try pool.write { db in
@@ -554,6 +632,63 @@ public final class SQLiteClipStore: ClipStore {
     }
   }
 
+  // MARK: - Maintenance
+
+  /// Reclaims space and rebuilds the search index.
+  ///
+  /// Two separate problems, deliberately ordered:
+  ///
+  /// 1. `secure_delete` overwrites freed pages instead of releasing them, so a
+  ///    store that has seen many deletions is mostly holes. Only `VACUUM`
+  ///    returns those pages to the filesystem.
+  /// 2. FTS5 keeps its own index structures. Every insert and delete dirties
+  ///    them, and without `optimize` the segments accumulate until queries
+  ///    scan far more than they should.
+  ///
+  /// `VACUUM` rewrites the whole database and needs an exclusive lock, so it is
+  /// only worth doing when there is something to reclaim — measured as a ratio
+  /// of free pages to total, which `PRAGMA freelist_count` reports directly.
+  public func compact(
+    minimumReclaimableFraction: Double = 0.25,
+    force: Bool = false
+  ) throws -> Int {
+    let pagesBefore = try pool.read { db -> Int64 in
+      (try Int64.fetchOne(db, sql: "PRAGMA page_count")) ?? 0
+    }
+    let freeBefore = try pool.read { db -> Int64 in
+      (try Int64.fetchOne(db, sql: "PRAGMA freelist_count")) ?? 0
+    }
+
+    // Cheap and always correct: merge FTS segments regardless of free pages.
+    try pool.write { db in
+      try db.execute(sql: "INSERT INTO clip_fts(clip_fts) VALUES('optimize')")
+    }
+
+    guard force || pagesBefore > 0 else { return 0 }
+    let reclaimable = pagesBefore > 0 ? Double(freeBefore) / Double(pagesBefore) : 0
+    guard force || reclaimable >= minimumReclaimableFraction else { return 0 }
+
+    // VACUUM cannot run inside a transaction, so it needs its own writer.
+    try pool.writeWithoutTransaction { db in
+      try db.execute(sql: "VACUUM")
+    }
+
+    let pagesAfter = try pool.read { db -> Int64 in
+      (try Int64.fetchOne(db, sql: "PRAGMA page_count")) ?? 0
+    }
+    let reclaimed = pagesBefore - pagesAfter
+    if reclaimed > 0 {
+      Self.log.info("compacted database: \(reclaimed) of \(pagesBefore) pages reclaimed")
+    }
+    return Int(max(0, reclaimed))
+  }
+
+  /// Compacts only when enough is at stake to be worth the exclusive lock.
+  @discardableResult
+  public func compactIfNeeded(minimumReclaimableFraction: Double = 0.25) throws -> Int {
+    try compact(minimumReclaimableFraction: minimumReclaimableFraction, force: false)
+  }
+
   public func count() throws -> Int {
     try pool.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clip") ?? 0 }
   }
@@ -578,5 +713,22 @@ public final class SQLiteClipStore: ClipStore {
     )
     try db.execute(sql: "DELETE FROM clip_content WHERE clip_id = ?", arguments: [id])
     try db.execute(sql: "DELETE FROM clip WHERE id = ?", arguments: [id])
+  }
+
+  /// Re-arms the export obligation.
+  ///
+  /// Two callers: a test reproducing "process died after the file was written
+  /// but before the flag was cleared", and the vault import when a note is
+  /// found missing from disk. Both must recover as an idempotent re-export
+  /// rather than a duplicate.
+  public func rearmExport(ids: [UUID]) throws {
+    guard !ids.isEmpty else { return }
+    try pool.write { db in
+      let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+      try db.execute(
+        sql: "UPDATE clip SET exported_at = NULL WHERE id IN (\(placeholders))",
+        arguments: StatementArguments(ids.map(\.uuidString))
+      )
+    }
   }
 }

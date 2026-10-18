@@ -123,6 +123,8 @@ public enum VaultNote {
   // MARK: - Parsing
 
   public struct Decoded: Sendable {
+    /// Frontmatter `schema`. Present on every note we write.
+    public var schema: Int
     public var id: UUID
     public var createdAt: Date
     public var kind: ClipKind
@@ -178,8 +180,12 @@ public enum VaultNote {
     let pinned = fields["pinned"] == "true"
     let locked = fields["locked"] == "true"
     let useCount = Int(fields["use_count"] ?? "") ?? 1
+    // A note from a newer copyz may interpret our fields differently, so
+    // importing it could corrupt state. Treat it as unreadable instead.
+    let schema = Int(fields["schema"] ?? "") ?? schemaVersion
 
     return Decoded(
+      schema: schema,
       id: id,
       createdAt: createdAt,
       kind: kind,

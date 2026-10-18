@@ -33,13 +33,15 @@ struct TombstoneTests {
 
     // Simulate the other machine still having the note: the vault importer
     // preserves the note's original id, so re-recording that id must be a no-op.
+    // A vault import carries no resurrection rights.
     let reimported = ClipItem(
       id: clip.id,
       createdAt: clip.createdAt,
       contents: [ClipContent(
         type: PasteboardType.string.rawValue,
         value: Data("delete me".utf8)
-      )]
+      )],
+      isFromLocalCapture: false
     )
     _ = try store.record(reimported)
 

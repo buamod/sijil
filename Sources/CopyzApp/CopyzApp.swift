@@ -319,6 +319,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           self?.panelModel.replaceItems(service.items)
         }
       },
+      onClearHistory: { [weak self] in
+        guard let self, let service = self.service else { return }
+        Task { @MainActor in
+          await service.clearAll(includingPinned: true)
+          self.panelModel.replaceItems(service.items)
+        }
+      },
       rejection: service?.lastRejection
     )
 
@@ -441,6 +448,7 @@ struct CaptureSettings: View {
 
 struct PrivacySettings: View {
   @Environment(Settings.self) private var settings
+  @Environment(ClipboardService.self) private var service
 
   var body: some View {
     @Bindable var settings = settings
@@ -452,6 +460,19 @@ struct PrivacySettings: View {
         )
         .font(.callout)
         .foregroundStyle(.secondary)
+        Toggle("Don't record passwords and API keys", isOn: $settings.rules.detectsSecrets)
+        Text(
+          "Copies from password managers are dropped outright. Everything else is "
+            + "checked for private keys, tokens, API keys, card numbers, and "
+            + "credential-bearing URLs before it can reach disk."
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        if case .secretDetected(let kind) = service.lastRejection {
+          Label("Last copy dropped: \(kind.description)", systemImage: "eye.slash")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
       }
 
       Section("Ignored apps") {
@@ -483,6 +504,15 @@ struct PrivacySettings: View {
         .foregroundStyle(.secondary)
         Button("Open Accessibility Settings") {
           Accessibility.openSettings()
+        }
+      }
+
+      Section("Startup") {
+        Toggle("Open copyz at login", isOn: $settings.launchAtLogin)
+        if let error = settings.launchAtLoginError {
+          Label(error, systemImage: "exclamationmark.triangle")
+            .font(.callout)
+            .foregroundStyle(.secondary)
         }
       }
     }
@@ -533,6 +563,15 @@ struct VaultSettings: View {
         Button("Rebuild Index From Vault") {
           NotificationCenter.default.post(name: .copyzRebuildVault, object: nil)
         }
+        Button("Compact Database Now") {
+          NotificationCenter.default.post(name: .copyzCompact, object: nil)
+        }
+        Text(
+          "Compaction reclaims the space freed by deletions and merges the search "
+            + "index. It runs automatically when enough is at stake to be worth it."
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
       }
     }
     .formStyle(.grouped)
@@ -555,4 +594,5 @@ extension Notification.Name {
   static let copyzRulesChanged = Notification.Name("app.copyz.rulesChanged")
   static let copyzFlushVault = Notification.Name("app.copyz.flushVault")
   static let copyzRebuildVault = Notification.Name("app.copyz.rebuildVault")
+  static let copyzCompact = Notification.Name("app.copyz.compact")
 }

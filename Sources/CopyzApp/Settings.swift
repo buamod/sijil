@@ -1,6 +1,7 @@
 import CopyzCore
 import Foundation
 import Observation
+import ServiceManagement
 
 /// User-facing preferences.
 ///
@@ -26,9 +27,34 @@ public final class Settings {
     didSet { defaults.set(vaultRootPath, forKey: Keys.vaultRoot) }
   }
 
+  /// Whether copyz is registered to open at login.
+  ///
+  /// Deliberately *not* persisted. The system's login-item list is the truth:
+  /// the user can revoke the item in System Settings at any time, so a value
+  /// copiedz remembered would drift and eventually show a tick that does
+  /// nothing. Every write goes through to `SMAppService` instead.
+  ///
+  /// A rejected request rolls the property back and records why, rather than
+  /// leaving the UI claiming a state the system refused.
   public var launchAtLogin: Bool {
-    didSet { defaults.set(launchAtLogin, forKey: Keys.launchAtLogin) }
+    get { isLaunchItemRegistered }
+    set {
+      guard newValue != isLaunchItemRegistered else { return }
+      do {
+        try LaunchAtLogin.set(newValue)
+        isLaunchItemRegistered = newValue
+        launchAtLoginError = nil
+      } catch {
+        launchAtLoginError = error.localizedDescription
+        isLaunchItemRegistered = LaunchAtLogin.isRegistered
+      }
+    }
   }
+
+  private var isLaunchItemRegistered: Bool
+
+  /// Why a requested change could not be applied, shown under the toggle.
+  public var launchAtLoginError: String?
 
   private let defaults: UserDefaults
 
@@ -37,7 +63,6 @@ public final class Settings {
     static let retention = "retentionPolicy"
     static let pollInterval = "pollInterval"
     static let vaultRoot = "vaultRootPath"
-    static let launchAtLogin = "launchAtLogin"
   }
 
   public init(defaults: UserDefaults = .standard) {
@@ -51,8 +76,10 @@ public final class Settings {
       ?? RetentionPolicy()
     self.pollInterval = defaults.object(forKey: Keys.pollInterval) as? TimeInterval ?? 0.4
     self.vaultRootPath = defaults.string(forKey: Keys.vaultRoot)
-    self.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
+    self.isLaunchItemRegistered = LaunchAtLogin.isRegistered
   }
+
+  // MARK: - Login item
 
   // `UserDefaults` has no built-in Codable bridge.
   private func persist<T: Encodable>(_ value: T, forKey key: String) {

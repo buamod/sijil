@@ -134,16 +134,125 @@ struct DeletionPropagationTests {
     #expect(merged?.pinned == true)
   }
 
-  @Test("Tombstones are prunable so the sidecar cannot grow forever")
-  func tombstonesPrunable() async {
+  @Test("Tombstones are collected only after every replica acknowledges")
+  func acknowledgedCollection() async {
+    let sidecar = CollectionStore(sidecarURL: nil)
+    let clipID = UUID()
+    let peer = UUID()
+
+    await sidecar.tombstone(clipID, at: Date(timeIntervalSince1970: 1_000))
+
+    // No peers yet: our own acknowledgement is enough.
+    await sidecar.acknowledgeDeletions()
+    #expect(await sidecar.canCollect(clipID))
+
+    // A peer appears that has not acknowledged the deletion.
+    var incoming = VaultSidecar()
+    incoming.watermarks[peer] = DeviceWatermark(
+      deviceID: peer,
+      observedDeletes: Date(timeIntervalSince1970: 500)
+    )
+    await sidecar.merge(incoming)
+
+    // Now the tombstone is blocked, because the peer has not seen it.
+    #expect(await sidecar.canCollect(clipID) == false)
+    #expect(await sidecar.collectAcknowledgedTombstones() == 0)
+    #expect(await sidecar.isTombstoned(clipID))
+  }
+
+  @Test("An offline peer blocks collection past any age")
+  func offlinePeerBlocksForever() async {
+    let sidecar = CollectionStore(sidecarURL: nil)
+    let clipID = UUID()
+    let peer = UUID()
+
+    await sidecar.tombstone(clipID, at: Date(timeIntervalSince1970: 1_000))
+    await sidecar.acknowledgeDeletions()
+
+    var incoming = VaultSidecar()
+    incoming.watermarks[peer] = DeviceWatermark(
+      deviceID: peer,
+      observedDeletes: Date(timeIntervalSince1970: 0)
+    )
+    await sidecar.merge(incoming)
+
+    // A year later the tombstone is still held: age is not evidence that a
+    // replica has seen the delete.
+    #expect(await sidecar.canCollect(clipID, now: Date(timeIntervalSince1970: 31_536_000)) == false)
+  }
+
+  @Test("Once the peer acknowledges, the tombstone can be collected")
+  func peerAcknowledgementUnblocksCollection() async {
+    let sidecar = CollectionStore(sidecarURL: nil)
+    let clipID = UUID()
+    let peer = UUID()
+
+    await sidecar.tombstone(clipID, at: Date(timeIntervalSince1970: 1_000))
+    await sidecar.acknowledgeDeletions()
+
+    var incoming = VaultSidecar()
+    incoming.watermarks[peer] = DeviceWatermark(
+      deviceID: peer,
+      observedDeletes: Date(timeIntervalSince1970: 2_000)
+    )
+    await sidecar.merge(incoming)
+
+    #expect(await sidecar.canCollect(clipID))
+    #expect(await sidecar.collectAcknowledgedTombstones() == 1)
+    #expect(await sidecar.isTombstoned(clipID) == false)
+  }
+
+  @Test("Collection bumps the epoch so a returning peer knows it fell behind")
+  func collectionBumpsEpoch() async {
+    let sidecar = CollectionStore(sidecarURL: nil)
+    let clipID = UUID()
+    await sidecar.tombstone(clipID, at: Date(timeIntervalSince1970: 1_000))
+    await sidecar.acknowledgeDeletions()
+
+    #expect(await sidecar.hasFallenBehind() == false)
+    _ = await sidecar.collectAcknowledgedTombstones()
+
+    // Our own epoch advanced with the collection, so we are current.
+    #expect(await sidecar.hasFallenBehind() == false)
+  }
+
+  @Test("A silently-abandoned replica stops blocking after retirement")
+  func stalePeerIsRetired() async {
+    let sidecar = CollectionStore(sidecarURL: nil)
+    let clipID = UUID()
+    let peer = UUID()
+
+    // Everything is anchored to a fixed "now" so retirement is deterministic.
+    let now = Date(timeIntervalSince1970: 100 * 24 * 3600)
+    await sidecar.tombstone(clipID, at: now.addingTimeInterval(-1_000))
+    await sidecar.acknowledgeDeletions()
+
+    // Peer last reported long ago and never saw the deletion.
+    var incoming = VaultSidecar()
+    incoming.watermarks[peer] = DeviceWatermark(
+      deviceID: peer,
+      observedDeletes: .distantPast,
+      updatedAt: now.addingTimeInterval(-30 * 24 * 3600)
+    )
+    await sidecar.merge(incoming)
+
+    // Within the retirement window it still blocks collection.
+    #expect(await sidecar.canCollect(clipID, now: now) == false)
+    // Past the retirement interval it no longer does.
+    let muchLater = now.addingTimeInterval(90 * 24 * 3600)
+    #expect(await sidecar.canCollect(clipID, now: muchLater))
+  }
+
+  @Test("Age-based pruning remains available for single-device setups")
+  func agePruneStillAvailable() async {
     let sidecar = CollectionStore(sidecarURL: nil)
     let old = UUID()
     let recent = UUID()
 
     await sidecar.tombstone(old, at: Date(timeIntervalSince1970: 1_000))
     await sidecar.tombstone(recent, at: Date())
-    await sidecar.pruneTombstones(olderThan: Date(timeIntervalSince1970: 500_000))
 
+    #expect(await sidecar.pruneTombstones(olderThan: Date(timeIntervalSince1970: 500_000)) == 1)
     #expect(await sidecar.isTombstoned(old) == false)
     #expect(await sidecar.isTombstoned(recent))
   }
