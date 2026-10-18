@@ -142,7 +142,7 @@ struct ClipListView: View {
     ScrollViewReader { proxy in
       List(selection: selectionBinding) {
         ForEach(model.visibleItems) { item in
-          ClipRow(item: item)
+          ClipRow(item: item, timestamp: model.timestamp(for: item))
             .tag(item.id)
             .contextMenu { contextMenu(for: item) }
             .onTapGesture(count: 2) { onPreview(item) }
@@ -151,7 +151,17 @@ struct ClipListView: View {
       .listStyle(.plain)
       .onChange(of: model.selection) { _, newValue in
         guard let newValue else { return }
-        withAnimation { proxy.scrollTo(newValue, anchor: .center) }
+        // Only the keyboard gets the animation. Animating a click-driven scroll
+        // is what made clicking feel sluggish: the row highlighted at once but
+        // the list was still easing toward the new position afterwards.
+        if model.selectionMovedByKeyboard {
+          withAnimation { proxy.scrollTo(newValue, anchor: .center) }
+        } else {
+          // `anchor: nil` scrolls only as far as needed to reveal the row, which
+          // is what a click should do — centring a clicked row throws away the
+          // user's place in the list.
+          proxy.scrollTo(newValue, anchor: nil)
+        }
       }
     }
   }
@@ -161,7 +171,11 @@ struct ClipListView: View {
   private var selectionBinding: Binding<UUID?> {
     Binding(
       get: { model.selection },
-      set: { model.selection = $0 }
+      set: { value in
+        // Routed through `select` so the view can tell a click from a keypress
+        // and decide whether to animate.
+        if let value { model.select(value) } else { model.selection = nil }
+      }
     )
   }
 
@@ -240,6 +254,9 @@ struct ClipListView: View {
 
 struct ClipRow: View {
   let item: ClipItem
+  /// Pre-rendered, because a relative date style per row schedules its own
+  /// refresh and a list of them re-renders on a timer.
+  let timestamp: String
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
@@ -257,7 +274,7 @@ struct ClipRow: View {
             Text(app)
           }
           Text("·")
-          Text(item.createdAt, format: .relative(presentation: .numeric))
+          Text(timestamp)
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
