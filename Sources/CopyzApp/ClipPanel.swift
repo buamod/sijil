@@ -28,6 +28,7 @@ struct ClipListView: View {
   let onTransform: (ClipItem) -> Void
   let onPreview: (ClipItem) -> Void
   let onFile: (ClipItem, UUID?) -> Void
+  let onToggleLock: (ClipItem) -> Void
   /// Why the last copy was skipped, if it was.
   var rejection: CaptureRules.Rejection?
 
@@ -100,6 +101,9 @@ struct ClipListView: View {
     Button("Preview") { onPreview(item) }
     Divider()
     Button(item.pinned ? "Unpin" : "Pin") { onTogglePin(item) }
+    Button(item.locked ? "Unlock" : "Lock (survives Clear History)") {
+      onToggleLock(item)
+    }
     Menu("Add to Collection") {
       Button("None") { onFile(item, nil) }
       if !collections.isEmpty { Divider() }
@@ -163,10 +167,18 @@ struct ClipRow: View {
         .foregroundStyle(.secondary)
       }
       Spacer(minLength: 0)
-      if item.pinned {
-        Image(systemName: "pin.fill")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+      VStack(alignment: .trailing, spacing: 2) {
+        if item.locked {
+          // Lock outranks pin: it is the stronger promise.
+          Image(systemName: "lock.fill")
+            .font(.caption2)
+            .foregroundStyle(.tint)
+        }
+        if item.pinned {
+          Image(systemName: "pin.fill")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
       }
     }
     .padding(.vertical, 2)

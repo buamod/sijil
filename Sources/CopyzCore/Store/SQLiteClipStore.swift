@@ -62,6 +62,7 @@ public final class SQLiteClipStore: ClipStore {
           source_bundle_id TEXT,
           source_app_name  TEXT,
           pinned           INTEGER NOT NULL DEFAULT 0,
+          locked           INTEGER NOT NULL DEFAULT 0,
           collection       TEXT,
           use_count        INTEGER NOT NULL DEFAULT 1,
           title            TEXT    NOT NULL DEFAULT '',
@@ -70,10 +71,22 @@ public final class SQLiteClipStore: ClipStore {
         )
         """)
 
+      // Tombstones outlive the rows they refer to: vault import is read-only,
+      // so without this a deleted clip is re-added from the note that still
+      // exists on every other synced machine.
+      try db.execute(sql: """
+        CREATE TABLE clip_tombstone (
+          id         TEXT PRIMARY KEY,
+          deleted_at REAL NOT NULL
+        )
+        """)
+      try db.execute(sql: "CREATE INDEX clip_tombstone_deleted ON clip_tombstone(deleted_at)")
+
       // Content-addressed dedupe: the same clip copied twice is one row.
       try db.execute(sql: "CREATE UNIQUE INDEX clip_content_hash ON clip(content_hash)")
       try db.execute(sql: "CREATE INDEX clip_created ON clip(created_at DESC)")
       try db.execute(sql: "CREATE INDEX clip_unexported ON clip(exported_at) WHERE exported_at IS NULL")
+      try db.execute(sql: "CREATE INDEX clip_locked ON clip(locked) WHERE locked = 1")
 
       try db.execute(sql: """
         CREATE TABLE clip_content (
@@ -111,6 +124,7 @@ public final class SQLiteClipStore: ClipStore {
     var sourceBundleID: String?
     var sourceAppName: String?
     var pinned: Int
+    var locked: Int
     var collection: String?
     var useCount: Int
     var title: String
@@ -125,6 +139,7 @@ public final class SQLiteClipStore: ClipStore {
       case sourceBundleID = "source_bundle_id"
       case sourceAppName = "source_app_name"
       case pinned
+      case locked
       case collection
       case useCount = "use_count"
       case title
@@ -153,6 +168,7 @@ public final class SQLiteClipStore: ClipStore {
       sourceAppName: row.sourceAppName,
       contents: contents,
       pinned: row.pinned != 0,
+      locked: row.locked != 0,
       collection: row.collection,
       useCount: row.useCount,
       title: row.title
@@ -214,18 +230,25 @@ public final class SQLiteClipStore: ClipStore {
         return try self.reload(existing.id, in: db)
       }
 
+      // A tombstoned clip must never come back. Vault import is read-only by
+      // design, so without this check a delete on one machine is silently
+      // undone by the note still sitting in every other machine's vault.
+      if try isTombstonedIn(item.id.uuidString, in: db) {
+        return item
+      }
+
       try db.execute(
         sql: """
           INSERT INTO clip
             (id, content_hash, created_at, last_used_at, source_bundle_id,
-             source_app_name, pinned, collection, use_count, title, kind, exported_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+             source_app_name, pinned, locked, collection, use_count, title, kind, exported_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
           """,
         arguments: [
           item.id.uuidString, hash,
           item.createdAt.timeIntervalSince1970, item.lastUsedAt.timeIntervalSince1970,
           item.sourceBundleID, item.sourceAppName,
-          item.pinned ? 1 : 0, item.collection, item.useCount,
+          item.pinned ? 1 : 0, item.locked ? 1 : 0, item.collection, item.useCount,
           item.title, item.kind.rawValue,
         ]
       )
@@ -267,10 +290,10 @@ public final class SQLiteClipStore: ClipStore {
   public func recent(limit: Int, includeUnpinnedOnly: Bool = false) throws -> [ClipItem] {
     try pool.read { db in
       var request = ClipRow
-        .order(Column("pinned").desc, Column("created_at").desc)
+        .order(Column("locked").desc, Column("pinned").desc, Column("created_at").desc)
         .limit(limit)
       if includeUnpinnedOnly {
-        request = request.filter(Column("pinned") == 0)
+        request = request.filter(Column("pinned") == 0).filter(Column("locked") == 0)
       }
       return try self.hydrate(request.fetchAll(db), in: db)
     }
@@ -315,6 +338,58 @@ public final class SQLiteClipStore: ClipStore {
     }
   }
 
+  public func setLocked(_ locked: Bool, id: UUID) throws {
+    try pool.write { db in
+      try db.execute(
+        sql: "UPDATE clip SET locked = ? WHERE id = ?",
+        arguments: [locked ? 1 : 0, id.uuidString]
+      )
+    }
+  }
+
+  // MARK: - Tombstones
+
+  /// Records that `id` was deleted, removing any surviving row.
+  ///
+  /// Removing the row matters: a tombstone left alongside its clip would still
+  /// leave that clip searchable, which is not what "deleted" means to a user.
+  public func tombstone(_ id: UUID, at date: Date = Date()) throws {
+    try pool.write { db in
+      try self.deleteRow(id.uuidString, in: db)
+      try db.execute(
+        sql: "INSERT OR REPLACE INTO clip_tombstone (id, deleted_at) VALUES (?, ?)",
+        arguments: [id.uuidString, date.timeIntervalSince1970]
+      )
+    }
+  }
+
+  public func isTombstoned(_ id: UUID) -> Bool {
+    (try? pool.read { db in try isTombstonedIn(id.uuidString, in: db) }) ?? false
+  }
+
+  public func tombstoneCount() throws -> Int {
+    try pool.read { db in try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clip_tombstone") ?? 0 }
+  }
+
+  @discardableResult
+  public func pruneTombstones(olderThan date: Date) throws -> Int {
+    try pool.write { db in
+      try db.execute(
+        sql: "DELETE FROM clip_tombstone WHERE deleted_at < ?",
+        arguments: [date.timeIntervalSince1970]
+      )
+      return db.changesCount
+    }
+  }
+
+  private func isTombstonedIn(_ id: String, in db: Database) throws -> Bool {
+    try Bool.fetchOne(
+      db,
+      sql: "SELECT EXISTS(SELECT 1 FROM clip_tombstone WHERE id = ?)",
+      arguments: [id]
+    ) ?? false
+  }
+
   public func markUsed(id: UUID) throws {
     try pool.write { db in
       try db.execute(
@@ -333,20 +408,65 @@ public final class SQLiteClipStore: ClipStore {
     }
   }
 
+  /// Deletes a clip and tombstones it, so a sync from another machine cannot
+  /// resurrect it.
   public func delete(id: UUID) throws {
+    try delete(ids: [id], tombstone: true)
+  }
+
+  /// Removes rows without tombstoning.
+  ///
+  /// Used when the *index* is being discarded rather than the user's data —
+  /// a lost database, or an index rebuild. Tombstoning there would make every
+  /// recovered clip look deleted and permanently block its re-import.
+  public func purge(id: UUID) throws {
+    try delete(ids: [id], tombstone: false)
+  }
+
+  private func delete(ids: [UUID], tombstone shouldTombstone: Bool) throws {
+    guard !ids.isEmpty else { return }
     try pool.write { db in
-      try self.deleteRow(id.uuidString, in: db)
+      let now = Date().timeIntervalSince1970
+      for id in ids {
+        try self.deleteRow(id.uuidString, in: db)
+        if shouldTombstone {
+          try db.execute(
+            sql: "INSERT OR REPLACE INTO clip_tombstone (id, deleted_at) VALUES (?, ?)",
+            arguments: [id.uuidString, now]
+          )
+        }
+      }
     }
   }
 
   public func deleteAll(includingPinned: Bool) throws -> [UUID] {
+    try deleteAll(includingPinned: includingPinned, tombstone: true)
+  }
+
+  /// Clears history. Locked items always survive, matching PastePal's
+  /// `ZLOCKED`, which is a stronger promise than pinned.
+  public func deleteAll(
+    includingPinned: Bool,
+    tombstone shouldTombstone: Bool
+  ) throws -> [UUID] {
     try pool.write { db in
       var request = ClipRow.all()
       if !includingPinned {
         request = request.filter(Column("pinned") == 0)
       }
+      request = request.filter(Column("locked") == 0)
       let ids = try request.fetchAll(db).map(\.id)
-      for id in ids { try self.deleteRow(id, in: db) }
+
+      let now = Date().timeIntervalSince1970
+      for id in ids {
+        try self.deleteRow(id, in: db)
+        if shouldTombstone {
+          try db.execute(
+            sql: "INSERT OR REPLACE INTO clip_tombstone (id, deleted_at) VALUES (?, ?)",
+            arguments: [id, now]
+          )
+        }
+      }
       return ids.compactMap(UUID.init(uuidString:))
     }
   }
@@ -376,7 +496,11 @@ public final class SQLiteClipStore: ClipStore {
   public func prune(policy: RetentionPolicy, now: Date = Date()) throws -> [UUID] {
     try pool.write { db in
       var victims: Set<String> = []
-      let guardClause = policy.preservesPinned ? "AND pinned = 0 AND collection IS NULL" : ""
+      // Locked and pinned/filed items are protected, and each has its own
+      // switch because locked is a strictly stronger promise.
+      var guardClause = ""
+      if policy.preservesLocked { guardClause += " AND locked = 0" }
+      if policy.preservesPinned { guardClause += " AND pinned = 0 AND collection IS NULL" }
       let binaryKinds = ClipKind.allCases.filter(\.isBinary).map(\.rawValue)
 
       // Binary payloads only earn their bytes inside the fidelity window.
@@ -416,7 +540,8 @@ public final class SQLiteClipStore: ClipStore {
           sql: """
             SELECT id FROM clip
             WHERE rowid_pk NOT IN (
-              SELECT rowid_pk FROM clip ORDER BY pinned DESC, created_at DESC LIMIT ?
+              SELECT rowid_pk FROM clip
+              ORDER BY locked DESC, pinned DESC, created_at DESC LIMIT ?
             )
             \(guardClause)
             """,

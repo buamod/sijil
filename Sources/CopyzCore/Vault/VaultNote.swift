@@ -63,6 +63,7 @@ public enum VaultNote {
     out += "byte_count: \(item.contents.reduce(0) { $0 + $1.value.count })\n"
     out += "use_count: \(item.useCount)\n"
     if item.pinned { out += "pinned: true\n" }
+    if item.locked { out += "locked: true\n" }
     if let collection = item.collection, !collection.isEmpty {
       out += "collection: \(yamlQuoted(collection))\n"
     }
@@ -129,6 +130,7 @@ public enum VaultNote {
     public var sourceAppName: String?
     public var sourceBundleID: String?
     public var pinned: Bool
+    public var locked: Bool
     public var collection: String?
     public var useCount: Int
     public var body: String
@@ -174,6 +176,7 @@ public enum VaultNote {
 
     let createdAt = fields["ts"].flatMap { makeISOFormatter().date(from: $0) } ?? Date()
     let pinned = fields["pinned"] == "true"
+    let locked = fields["locked"] == "true"
     let useCount = Int(fields["use_count"] ?? "") ?? 1
 
     return Decoded(
@@ -184,6 +187,7 @@ public enum VaultNote {
       sourceAppName: fields["source_app"],
       sourceBundleID: fields["source_bundle_id"],
       pinned: pinned,
+      locked: locked,
       collection: fields["collection"],
       useCount: useCount,
       body: body.trimmingCharacters(in: .newlines)

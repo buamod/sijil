@@ -76,6 +76,8 @@ public struct VaultSidecar: Sendable, Equatable, Codable {
   public var schema: Int = 1
   public var collections: [Collection] = []
   public var pins: [UUID: PinRecord] = [:]
+  /// Deletions, keyed by clip id and timestamped so the newest wins on merge.
+  public var tombstoneDates: [UUID: Date] = [:]
 
   public init() {}
 
@@ -235,6 +237,32 @@ public actor CollectionStore {
     for collection in incoming.collections {
       _ = upsert(collection)
     }
+    for (id, date) in incoming.tombstoneDates {
+      tombstone(id, at: date)
+    }
+  }
+
+  // MARK: - Tombstones
+
+  /// Ids deleted on another machine.
+  ///
+  /// The vault is never rewritten, so a delete has to travel as metadata or
+  /// the note still sitting in the synced folder would be re-imported forever.
+  /// Timestamped so the newest delete always wins, matching the pin merge.
+  public func tombstone(_ clipID: UUID, at date: Date = Date()) {
+    if let existing = sidecar.tombstoneDates[clipID], existing > date { return }
+    sidecar.tombstoneDates[clipID] = date
+  }
+
+  public func isTombstoned(_ clipID: UUID) -> Bool {
+    sidecar.tombstoneDates[clipID] != nil
+  }
+
+  public var tombstones: Set<UUID> { Set(sidecar.tombstoneDates.keys) }
+
+  /// Drops tombstones older than `date`, so the sidecar cannot grow forever.
+  public func pruneTombstones(olderThan date: Date) {
+    sidecar.tombstoneDates = sidecar.tombstoneDates.filter { $0.value > date }
   }
 
   public var allPins: [UUID: PinRecord] { sidecar.pins }

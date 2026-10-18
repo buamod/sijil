@@ -35,19 +35,24 @@ public final class ClipboardService {
   public init(settings: Settings) throws {
     self.settings = settings
     self.store = try SQLiteClipStore.makeDefault()
+
+    // Collections, pin state, and tombstones live in a small sidecar inside
+    // the vault, so they sync through whatever folder the user picked. Built
+    // before `VaultStore` because import consults it for tombstones.
+    let sidecarURL = settings.vaultURL.appending(path: ".copyz/sidecar.json")
+    self.sidecarURL = sidecarURL
+    let collectionStore = CollectionStore(sidecarURL: sidecarURL)
+    self.collections = collectionStore
+
     self.vault = VaultStore(
       store: store,
-      writer: VaultWriter(rootURL: settings.vaultURL)
+      writer: VaultWriter(rootURL: settings.vaultURL),
+      collections: collectionStore
     )
     self.monitor = PasteboardMonitor(
       configuration: .init(pollInterval: settings.pollInterval),
       rules: settings.rules
     )
-    // Collections and pin state live in a small sidecar inside the vault, so
-    // they sync through whatever folder the user picked.
-    let sidecarURL = settings.vaultURL.appending(path: ".copyz/sidecar.json")
-    self.sidecarURL = sidecarURL
-    self.collections = CollectionStore(sidecarURL: sidecarURL)
 
     monitor.onEvent = { [weak self] event in
       self?.handle(event)
@@ -279,13 +284,40 @@ public final class ClipboardService {
 
   public func delete(_ item: ClipItem) {
     try? store.delete(id: item.id)
+    // Record the deletion in the sidecar as well, so it survives on the other
+    // machines the vault syncs to. The note itself is left alone: import is
+    // read-only and the user's synced copy is not ours to rewrite.
+    Task {
+      await collections.tombstone(item.id)
+      try? await collections.save()
+    }
     items.removeAll { $0.id == item.id }
-    // The vault note is left alone: import is read-only, and the user's synced
-    // copy is not ours to rewrite.
+  }
+
+  /// Stronger than pinning: survives a clear-history.
+  public func toggleLock(_ item: ClipItem) {
+    let next = !item.locked
+    try? store.setLocked(next, id: item.id)
+    if let index = items.firstIndex(where: { $0.id == item.id }) {
+      items[index].locked = next
+    }
+    Task {
+      if let updated = try? store.item(id: item.id) {
+        await vault.writeNow(updated)
+      }
+    }
   }
 
   public func clearAll(includingPinned: Bool) {
-    _ = try? store.deleteAll(includingPinned: includingPinned)
+    // A user clearing history is a deliberate delete, so it tombstones: without
+    // that, every other machine's vault would re-import what was just cleared.
+    let removed = (try? store.deleteAll(includingPinned: includingPinned, tombstone: true)) ?? []
+    Task {
+      for id in removed {
+        await collections.tombstone(id)
+      }
+      try? await collections.save()
+    }
     reload()
   }
 
@@ -314,7 +346,7 @@ public final class ClipboardService {
 
   public func rebuildFromVault() async {
     do {
-      _ = try store.deleteAll(includingPinned: true)
+      _ = try store.deleteAll(includingPinned: true, tombstone: false)
       _ = try await vault.rebuildIndex()
       reload()
     } catch {

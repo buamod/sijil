@@ -60,6 +60,13 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
   public var sourceAppName: String?
   public var contents: [ClipContent]
   public var pinned: Bool
+  /// Stronger than `pinned`: survives a clear-history, like PastePal's
+  /// `ZLOCKED`. Distinct because "I want this near the top" and "I must never
+  /// lose this" are different intents, and conflating them makes clear-history
+  /// either delete things the user relied on or be too weak to trust.
+  public var locked: Bool
+  /// Set once this clip has been deleted, so a vault import cannot resurrect it.
+  public var tombstoned: Bool
   public var collection: String?
   public var useCount: Int
   /// Cached, sanitized single-line preview. Recomputed on write; never trusted
@@ -74,6 +81,8 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
     sourceAppName: String? = nil,
     contents: [ClipContent] = [],
     pinned: Bool = false,
+    locked: Bool = false,
+    tombstoned: Bool = false,
     collection: String? = nil,
     useCount: Int = 1,
     title: String? = nil
@@ -85,6 +94,8 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
     self.sourceAppName = sourceAppName
     self.contents = contents
     self.pinned = pinned
+    self.locked = locked
+    self.tombstoned = tombstoned
     self.collection = collection
     self.useCount = useCount
     self.title = title ?? Self.makeTitle(from: contents)

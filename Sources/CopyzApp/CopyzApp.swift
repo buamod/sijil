@@ -313,6 +313,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       onTransform: { [weak self] item in self?.showTransforms(for: item) },
       onPreview: { [weak self] item in self?.showPreview(for: item) },
       onFile: { [weak self] item, id in self?.service?.file(item, into: id) },
+      onToggleLock: { [weak self] item in
+        self?.service?.toggleLock(item)
+        if let service = self?.service {
+          self?.panelModel.replaceItems(service.items)
+        }
+      },
       rejection: service?.lastRejection
     )
 

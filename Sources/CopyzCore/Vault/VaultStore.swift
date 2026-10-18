@@ -15,6 +15,8 @@ import os
 public actor VaultStore {
   private let store: SQLiteClipStore
   private let writer: VaultWriter
+  /// Collection and tombstone metadata. Held here so import can consult it.
+  public let collections: CollectionStore?
   private let log = Logger(subsystem: "app.copyz", category: "vault-store")
 
   /// Ids known to be present on disk, so export skips them without a disk read.
@@ -31,10 +33,12 @@ public actor VaultStore {
   public init(
     store: SQLiteClipStore,
     writer: VaultWriter,
+    collections: CollectionStore? = nil,
     debounce: Duration = .seconds(30)
   ) {
     self.store = store
     self.writer = writer
+    self.collections = collections
     self.debounce = debounce
   }
 
@@ -109,6 +113,18 @@ public actor VaultStore {
     for note in decoded {
       guard !onDisk.contains(note.id.uuidString) else { continue }
       do {
+        // A note for a clip deleted elsewhere must not come back. The vault is
+        // never rewritten, so the deletion travels in the sidecar instead.
+        if let collections, await collections.isTombstoned(note.id) {
+          onDisk.insert(note.id.uuidString)
+          continue
+        }
+
+        if try store.isTombstoned(note.id) {
+          onDisk.insert(note.id.uuidString)
+          continue
+        }
+
         if try store.item(matchingContentHash: note.contentHash) != nil {
           onDisk.insert(note.id.uuidString)
           continue
@@ -125,6 +141,7 @@ public actor VaultStore {
             value: Data(note.body.utf8)
           )],
           pinned: note.pinned,
+          locked: note.locked,
           collection: note.collection,
           useCount: note.useCount,
           title: TextSanitizer.previewLine(note.body)

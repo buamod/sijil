@@ -56,8 +56,9 @@ struct VaultStoreTests {
     _ = try store.record(textItem("recoverable"))
     _ = await vault.flushNow()
 
-    // Simulate losing the index entirely.
-    try store.deleteAll(includingPinned: true)
+    // Simulate losing the index entirely: no tombstones, because a lost
+    // database is not a user delete.
+    _ = try store.deleteAll(includingPinned: true, tombstone: false)
     #expect(try store.count() == 0)
 
     let imported = await vault.importFromVault()
@@ -74,7 +75,7 @@ struct VaultStoreTests {
 
     _ = try store.record(textItem("no duplicates"))
     _ = await vault.flushNow()
-    try store.deleteAll(includingPinned: true)
+    _ = try store.deleteAll(includingPinned: true, tombstone: false)
 
     #expect(await vault.importFromVault() == 1)
     #expect(await vault.importFromVault() == 0)
@@ -92,7 +93,7 @@ struct VaultStoreTests {
     }
     _ = await vault.flushNow()
 
-    try store.deleteAll(includingPinned: true)
+    _ = try store.deleteAll(includingPinned: true, tombstone: false)
     _ = try await vault.rebuildIndex()
     #expect(try store.count() == 5)
   }
@@ -105,7 +106,7 @@ struct VaultStoreTests {
 
     _ = try store.record(textItem("from vault"))
     _ = await vault.flushNow()
-    try store.deleteAll(includingPinned: true)
+    _ = try store.deleteAll(includingPinned: true, tombstone: false)
     _ = await vault.importFromVault()
 
     // If import failed to mark them exported, this flush would rewrite them.
