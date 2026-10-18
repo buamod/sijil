@@ -14,6 +14,29 @@ import os
 /// open. Notably, `Accessibility` is also categorically incompatible with the
 /// App Sandbox, whereas `CGEvent` posting (TCC `PostEvent`) is not.
 @MainActor
+/// Sends the synthetic ⌘V.
+///
+/// A protocol so the paste *sequence* can be tested without posting real
+/// events. The implementation posts `CGEvent`s, which needs a TCC `PostEvent`
+/// grant and would paste into whatever the test machine had focused.
+public protocol KeystrokeSending: AnyObject {
+  func sendPasteKeystroke()
+}
+
+extension KeystrokeSending where Self == CGEventKeystrokeSender {
+  @MainActor
+  static var cgEvent: CGEventKeystrokeSender { CGEventKeystrokeSender() }
+}
+
+/// The real implementation: posts `CGEvent`s.
+public final class CGEventKeystrokeSender: KeystrokeSending {
+  public init() {}
+
+  public func sendPasteKeystroke() {
+    PasteEngine.sendPasteKeystroke()
+  }
+}
+
 public enum PasteEngine {
   private static let log = Logger(subsystem: "app.copyz", category: "paste")
 
@@ -23,6 +46,7 @@ public enum PasteEngine {
   public enum Failure: LocalizedError {
     case accessibilityDenied
     case noTarget
+    case writeFailed
 
     public var errorDescription: String? {
       switch self {
@@ -31,6 +55,8 @@ public enum PasteEngine {
           + "Until then it copies and you press ⌘V."
       case .noTarget:
         "No target application to paste into."
+      case .writeFailed:
+        "Could not put the item on the clipboard."
       }
     }
   }
@@ -41,37 +67,79 @@ public enum PasteEngine {
   ///   took focus. Passing the current frontmost app at paste time would hand
   ///   us our own process.
   @discardableResult
+  @MainActor
   public static func paste(
     item: ClipItem,
     into target: NSRunningApplication?,
     pasteboard: NSPasteboard = .general,
     plainTextOnly: Bool = false
   ) -> Result<Void, Failure> {
-    guard Accessibility.requestIfNeeded() else {
+    paste(
+      item: item,
+      hasTarget: target != nil,
+      pasteboard: pasteboard,
+      plainTextOnly: plainTextOnly,
+      sender: .cgEvent,
+      isAccessibilityGranted: { Accessibility.requestIfNeeded() },
+      activate: { target?.activate() },
+      settle: { seconds in
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+      }
+    )
+  }
+
+  /// The paste sequence with every side effect injected.
+  ///
+  /// `paste(...)` needs a real Accessibility grant and a real frontmost app, so
+  /// none of the ordering that matters can be exercised through it — refuse
+  /// before writing, write before activating, activate before the keystroke.
+  ///
+  /// The target is reduced to `hasTarget` because that is the only thing the
+  /// sequence does with it: it activates, and `NSRunningApplication` cannot be
+  /// constructed outside a running app. Keeping it in the signature would make
+  /// the whole function untestable for no gain.
+  @MainActor
+  static func paste(
+    item: ClipItem,
+    hasTarget: Bool,
+    pasteboard: NSPasteboard,
+    plainTextOnly: Bool,
+    sender: KeystrokeSending,
+    isAccessibilityGranted: () -> Bool,
+    activate: () -> Void,
+    settle: (TimeInterval) -> Void
+  ) -> Result<Void, Failure> {
+    // Checked before anything else: prompting for Accessibility as a side effect
+    // of a paste the user is about to cancel is worse than not trying.
+    guard isAccessibilityGranted() else {
       log.error("paste refused: accessibility not granted")
       return .failure(.accessibilityDenied)
     }
 
-    guard let target else { return .failure(.noTarget) }
+    guard hasTarget else { return .failure(.noTarget) }
 
-    // Write first: if the write fails there is no point reactivating anything.
+    // Write first: if the write fails there is no point activating anything, and
+    // a failed write must not be reported as "no target", which is a different
+    // problem with a different fix.
     guard PasteboardWriter.write(item, to: pasteboard, plainTextOnly: plainTextOnly) else {
-      return .failure(.noTarget)
+      log.error("paste refused: pasteboard write failed")
+      return .failure(.writeFailed)
     }
 
     // `activateIgnoringOtherApps` is deprecated and inert on macOS 14+. A plain
     // activate is the supported path now that focus-stealing prevention exists.
-    target.activate()
+    activate()
 
     // Give the target a beat to become frontmost, or the keystroke lands while
     // our panel still owns focus.
-    RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-    sendPasteKeystroke()
+    settle(0.05)
+    sender.sendPasteKeystroke()
     return .success(())
   }
 
   /// Copies without pasting, for the no-Accessibility fallback.
   @discardableResult
+  @MainActor
   public static func copyOnly(
     item: ClipItem,
     pasteboard: NSPasteboard = .general,

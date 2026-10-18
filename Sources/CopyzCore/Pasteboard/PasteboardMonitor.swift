@@ -68,6 +68,7 @@ public final class PasteboardMonitor {
     started = true
     // Re-baseline so anything copied before launch is not recorded on start.
     lastChangeCount = pasteboard.changeCount
+    pendingSource = nil
     scheduleTimer()
   }
 
@@ -77,6 +78,9 @@ public final class PasteboardMonitor {
     timer = nil
     debounceTask?.cancel()
     debounceTask = nil
+    // A change observed but not yet read must not survive the stop, or it
+    // would be captured on the next start long after the fact.
+    pendingSource = nil
   }
 
   public func updateConfiguration(_ configuration: Configuration) {
@@ -97,6 +101,8 @@ public final class PasteboardMonitor {
     lastChangeCount = pasteboard.changeCount
     debounceTask?.cancel()
     debounceTask = nil
+    // Our own write is not a change to capture, so drop any pending read of it.
+    pendingSource = nil
   }
 
   private func scheduleTimer() {
@@ -119,7 +125,27 @@ public final class PasteboardMonitor {
 
   @objc
   private func tick() {
-    guard pasteboard.changeCount != lastChangeCount else { return }
+    poll()
+  }
+
+  /// Metadata for a change that has been observed but not yet read.
+  ///
+  /// Held explicitly so a pasteboard read can only happen in response to an
+  /// observed `changeCount` movement. Reading on any other trigger risks
+  /// capturing whatever happens to be on the pasteboard at that moment, which is
+  /// a copy the monitor never actually saw arrive.
+  private var pendingSource: (bundleID: String?, appName: String?)?
+
+  /// One poll: reads `changeCount` and, if it moved, schedules a debounced read.
+  ///
+  /// Split out from the timer callback so it can be driven directly by tests
+  /// against a private pasteboard. A `Timer` on `RunLoop.main` cannot be driven
+  /// deterministically, and this method is where all the interesting state
+  /// transitions live.
+  @discardableResult
+  func poll() -> Bool {
+    let current = pasteboard.changeCount
+    guard current != lastChangeCount else { return false }
 
     // Capture the source app *now*, while it is still frontmost. By the time
     // the debounce elapses the app may have changed — and once our own panel
@@ -131,15 +157,28 @@ public final class PasteboardMonitor {
     let sourceApp = NSWorkspace.shared.frontmostApplication
     let bundleID = sourceApp?.bundleIdentifier
     let appName = sourceApp?.localizedName
-    lastChangeCount = pasteboard.changeCount
+    lastChangeCount = current
 
+    pendingSource = (bundleID, appName)
     debounceTask?.cancel()
     debounceTask = Task { [weak self] in
       guard let self else { return }
-      try? await Task.sleep(for: configuration.debounceInterval)
+      try? await Task.sleep(for: self.configuration.debounceInterval)
       guard !Task.isCancelled else { return }
-      handleChange(sourceBundleID: bundleID, sourceAppName: appName)
+      self.flushPendingChange()
     }
+    return true
+  }
+
+  /// Reads the pasteboard if, and only if, a change is pending.
+  ///
+  /// Called by the debounce task once the settle window has passed, and directly
+  /// by tests. A no-op when nothing is pending, so a stray call cannot read the
+  /// pasteboard and capture a copy that was never observed arriving.
+  internal func flushPendingChange() {
+    guard let source = pendingSource else { return }
+    pendingSource = nil
+    handleChange(sourceBundleID: source.bundleID, sourceAppName: source.appName)
   }
 
   private func handleChange(sourceBundleID: String?, sourceAppName: String?) {
