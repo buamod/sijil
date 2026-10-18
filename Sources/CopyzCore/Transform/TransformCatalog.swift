@@ -8,7 +8,8 @@ import Foundation
 /// Foundation's own string transforms plus small pure-Swift helpers, so there
 /// is no dependency and every transform is testable in isolation.
 public enum TransformCatalog {
-  public static let all: [Transform] = caseTransforms + textTransforms
+  public static let all: [Transform] =
+    caseTransforms + textTransforms
     + encodeTransforms + escapeTransforms + webTransforms
     + numberTransforms + lineTransforms + sortTransforms
     + formatTransforms + pathTransforms
@@ -138,7 +139,8 @@ public enum TransformCatalog {
         category: .text,
         detail: "Collapse runs of whitespace to one space",
         apply: { input in
-          let collapsed = input
+          let collapsed =
+            input
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
@@ -215,21 +217,24 @@ public enum TransformCatalog {
         apply: { input in
           var out = input.trimmingCharacters(in: .whitespacesAndNewlines)
           if out.count >= 2,
-             (out.hasPrefix("\"") && out.hasSuffix("\"")) || (out.hasPrefix("'") && out.hasSuffix("'")) {
+            (out.hasPrefix("\"") && out.hasSuffix("\""))
+              || (out.hasPrefix("'") && out.hasSuffix("'"))
+          {
             out = String(out.dropFirst().dropLast())
           }
           return out
         }
       ),
-    ] + SystemTransform.transliterations.map { transliteration in
-      Transform(
-        id: "text.\(transliteration.id)",
-        name: transliteration.name,
-        category: .text,
-        detail: transliteration.detail,
-        apply: { SystemTransform.applyTransform(transliteration.id, to: $0) }
-      )
-    }
+    ]
+      + SystemTransform.transliterations.map { transliteration in
+        Transform(
+          id: "text.\(transliteration.id)",
+          name: transliteration.name,
+          category: .text,
+          detail: transliteration.detail,
+          apply: { SystemTransform.applyTransform(transliteration.id, to: $0) }
+        )
+      }
   }
 
   // MARK: - Encode
@@ -283,7 +288,8 @@ public enum TransformCatalog {
         category: .encode,
         detail: "Escape &, <, >, and quotes",
         apply: { input in
-          var out = input
+          var out =
+            input
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
@@ -333,7 +339,8 @@ public enum TransformCatalog {
         category: .escape,
         detail: "Wrap in single quotes, escaping as Python needs",
         apply: { input in
-          let escaped = input
+          let escaped =
+            input
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "'", with: "\\'")
             .replacingOccurrences(of: "\n", with: "\\n")
@@ -397,10 +404,11 @@ public enum TransformCatalog {
         detail: "One parameter per line",
         apply: { input in
           guard let components = URLComponents(string: input),
-                let items = components.queryItems, !items.isEmpty
+            let items = components.queryItems, !items.isEmpty
           else { return nil }
           let maxKey = items.map { $0.name.count }.max() ?? 0
-          return items
+          return
+            items
             .map { item -> String in
               let name = item.name.padding(
                 toLength: max(maxKey, item.name.count),
@@ -454,7 +462,8 @@ public enum TransformCatalog {
           guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
           let range = NSRange(input.startIndex..., in: input)
           let stripped = regex.stringByReplacingMatches(in: input, range: range, withTemplate: " ")
-          let collapsed = stripped
+          let collapsed =
+            stripped
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
@@ -469,10 +478,11 @@ public enum TransformCatalog {
         apply: { input in
           // ASCII-fold first, so "Café Über" slugs to "cafe-uber" rather than keeping
           // the accent, then strip what remains.
-          let transliterated = SystemTransform.applyTransform(
-            "Any-Latin; Latin-ASCII",
-            to: input
-          ) ?? input
+          let transliterated =
+            SystemTransform.applyTransform(
+              "Any-Latin; Latin-ASCII",
+              to: input
+            ) ?? input
           let lowered = transliterated.lowercased()
           var slug = ""
           var previousWasHyphen = false
@@ -498,7 +508,8 @@ public enum TransformCatalog {
             let url = URL(string: input.trimmingCharacters(in: .whitespacesAndNewlines)),
             let scheme = url.scheme, ["http", "https", "mailto"].contains(scheme)
           else { return nil }
-          let text = url.absoluteString == input
+          let text =
+            url.absoluteString == input
             ? (url.host ?? url.absoluteString)
             : input
           return "[\(text)](\(url.absoluteString))"
@@ -681,7 +692,9 @@ public enum TransformCatalog {
         name: "Sort lines A→Z",
         category: .lines,
         detail: "Alphabetical",
-        apply: { input in Self.sortLines(input) { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending } }
+        apply: { input in
+          Self.sortLines(input) { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        }
       ),
       Transform(
         id: "lines.sort-length",
@@ -728,7 +741,8 @@ public enum TransformCatalog {
             return prefix.isEmpty ? nil : prefix.count
           }
           guard let minimum = indents.min(), minimum > 0 else { return input }
-          return lines
+          return
+            lines
             .map { line -> String in
               line.count >= minimum ? String(line.dropFirst(minimum)) : line
             }
@@ -904,10 +918,12 @@ public enum TransformCatalog {
             guard row.count == header.count else { return nil }
             return Dictionary(uniqueKeysWithValues: zip(header, row))
           }
-          guard let data = try? JSONSerialization.data(
-            withJSONObject: objects,
-            options: [.prettyPrinted, .sortedKeys]
-          ) else { return nil }
+          guard
+            let data = try? JSONSerialization.data(
+              withJSONObject: objects,
+              options: [.prettyPrinted, .sortedKeys]
+            )
+          else { return nil }
           return String(data: data, encoding: .utf8)
         }
       ),
@@ -1005,10 +1021,14 @@ public enum TransformCatalog {
     return rows.filter { $0.contains { !$0.isEmpty } }
   }
 
-  private static func delimited(_ input: String, from separator: Character, to output: Character) -> String? {
-    let rows = separator == "," ? parseCSV(input) : parseCSV(input.replacingOccurrences(of: "\t", with: ","))
+  private static func delimited(
+    _ input: String, from separator: Character, to output: Character
+  ) -> String? {
+    let rows =
+      separator == "," ? parseCSV(input) : parseCSV(input.replacingOccurrences(of: "\t", with: ","))
     guard !rows.isEmpty else { return nil }
-    return rows
+    return
+      rows
       .map { row in
         row.map { field -> String in
           field.contains(output) ? "\"\(field)\"" : field
@@ -1098,13 +1118,13 @@ extension String {
     /// uppercase — that splits "createTable" into ["create", "Table"] while
     /// leaving "HTTPServer" whole instead of shattering it into single letters.
     /// Break before an uppercase letter when the preceding character was
-      /// lowercase or a digit — that splits "createTable" into ["create",
-      /// "Table"] while leaving "HTTPServer" whole instead of shattering it
-      /// into single letters.
-      func shouldBreakBeforeUppercase(_ previous: Character?) -> Bool {
-        guard let previous else { return false }
-        return !previous.isUppercase
-      }
+    /// lowercase or a digit — that splits "createTable" into ["create",
+    /// "Table"] while leaving "HTTPServer" whole instead of shattering it
+    /// into single letters.
+    func shouldBreakBeforeUppercase(_ previous: Character?) -> Bool {
+      guard let previous else { return false }
+      return !previous.isUppercase
+    }
 
     var previous: Character?
     for character in self {

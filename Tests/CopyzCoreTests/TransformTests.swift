@@ -143,7 +143,8 @@ struct TransformCatalogTests {
   func encodings() {
     expect("encode.base64", "hello", "aGVsbG8=")
     expect("encode.hex", "hi", "6869")
-    expect("encode.html-escape", "<a href=\"x\">&</a>", "&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;")
+    expect(
+      "encode.html-escape", "<a href=\"x\">&</a>", "&lt;a href=&quot;x&quot;&gt;&amp;&lt;/a&gt;")
     expect("encode.base64url", "subject?>", "c3ViamVjdD8-")
     expect("encode.uri", "a b&c", "a%20b%26c")
   }
@@ -224,7 +225,8 @@ struct TransformCatalogTests {
 
   @Test("Hashes match known vectors")
   func knownHashes() {
-    expect("number.sha256", "abc",
+    expect(
+      "number.sha256", "abc",
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
     expect("number.md5", "abc", "900150983cd24fb0d6963f7d28e17f72")
   }
@@ -360,7 +362,8 @@ struct TransformCatalogTests {
     expect("path.extension", "/Users/me/notes/todo.md", "md")
     expect("path.stem", "/Users/me/notes/todo.md", "todo")
     expect("path.dirname", "/Users/me/notes/todo.md", "/Users/me/notes")
-    expect("path.untilde", "~/notes", FileManager.default.homeDirectoryForCurrentUser.path + "/notes")
+    expect(
+      "path.untilde", "~/notes", FileManager.default.homeDirectoryForCurrentUser.path + "/notes")
   }
 
   @Test("Tilde shortening round-trips")

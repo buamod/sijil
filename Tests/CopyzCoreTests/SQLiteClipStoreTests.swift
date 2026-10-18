@@ -134,7 +134,8 @@ struct SQLiteClipStoreTests {
   func pruneEnforcesCeiling() throws {
     let store = try makeStore()
     for index in 0..<10 {
-      try store.record(textItem("item \(index)", at: Date(timeIntervalSince1970: Double(1_000 + index))))
+      try store.record(
+        textItem("item \(index)", at: Date(timeIntervalSince1970: Double(1_000 + index))))
     }
 
     let removed = try store.prune(
@@ -208,7 +209,9 @@ struct SQLiteClipStoreTests {
     let old = Date(timeIntervalSince1970: 1_000)
     let image = ClipItem(
       createdAt: old,
-      contents: [ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47]))]
+      contents: [
+        ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47]))
+      ]
     )
     #expect(image.kind == .image)
     try store.record(image)

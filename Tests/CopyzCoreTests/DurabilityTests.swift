@@ -20,7 +20,7 @@ struct DurabilityTests {
 
   private func textItem(_ text: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8))
     ])
   }
 
@@ -38,9 +38,10 @@ struct DurabilityTests {
     try await writer.prepare()
 
     _ = try await writer.write(textItem("durable"))
-    _ = try await writer.write(ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3, 4])),
-    ]))
+    _ = try await writer.write(
+      ClipItem(contents: [
+        ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3, 4]))
+      ]))
 
     let leftovers = ((try? FileManager.default.subpathsOfDirectory(atPath: root.path)) ?? [])
       .filter { $0.contains(".copyz-tmp-") }
@@ -111,12 +112,13 @@ struct DurabilityTests {
     try await writer.prepare()
 
     let image = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47]))
     ])
     let relative = try await writer.write(image)
 
     let assetName = try #require(VaultNote.assetName(for: image))
-    #expect(FileManager.default.fileExists(atPath: root.appending(path: "assets/\(assetName)").path))
+    #expect(
+      FileManager.default.fileExists(atPath: root.appending(path: "assets/\(assetName)").path))
     #expect(FileManager.default.fileExists(atPath: root.appending(path: relative).path))
   }
 
@@ -133,7 +135,7 @@ struct DurabilityTests {
     // not still recoverable in the file.
     let secret = "correct-horse-battery-staple-8f3a91"
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(secret.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(secret.utf8))
     ])
     try store.record(item)
     try store.delete(id: item.id)

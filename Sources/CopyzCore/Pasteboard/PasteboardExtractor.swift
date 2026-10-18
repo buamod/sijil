@@ -49,14 +49,16 @@ public enum PasteboardExtractor {
       // But an empty string *with* rich text is legitimate (e.g. an image-only
       // rich paste), so only drop it when nothing else is there.
       if types.contains(PasteboardType.string.rawValue),
-         isBlankString(pasteboardItem),
-         !hasRichPayload(pasteboardItem) {
+        isBlankString(pasteboardItem),
+        !hasRichPayload(pasteboardItem)
+      {
         continue
       }
 
       if let text = pasteboardItem.string(forType: .string),
-         !text.isEmpty,
-         patterns.matches(text) {
+        !text.isEmpty,
+        patterns.matches(text)
+      {
         return (ClipItem(contents: []), .patternMatched)
       }
 
@@ -65,9 +67,10 @@ public enum PasteboardExtractor {
       // inspect. Anything dropped here is dropped whole: a multi-item
       // pasteboard with one secret in it is not partially safe to keep.
       if rules.detectsSecrets,
-         let text = pasteboardItem.string(forType: .string),
-         !text.isEmpty,
-         let kind = SecretDetector().detect(in: text) {
+        let text = pasteboardItem.string(forType: .string),
+        !text.isEmpty,
+        let kind = SecretDetector().detect(in: text)
+      {
         return (ClipItem(contents: []), .secretDetected(kind))
       }
 
@@ -85,7 +88,7 @@ public enum PasteboardExtractor {
 
       for type in types.sorted() {
         guard let data = pasteboardItem.data(forType: NSPasteboard.PasteboardType(type)),
-              !data.isEmpty
+          !data.isEmpty
         else { continue }
         contents.append(ClipContent(type: type, value: data))
       }
@@ -112,13 +115,15 @@ public enum PasteboardExtractor {
   @MainActor
   private static func hasRichPayload(_ item: NSPasteboardItem) -> Bool {
     if let rtf = item.data(forType: .rtf),
-       let attributed = NSAttributedString(rtf: rtf, documentAttributes: nil),
-       !attributed.string.isEmpty {
+      let attributed = NSAttributedString(rtf: rtf, documentAttributes: nil),
+      !attributed.string.isEmpty
+    {
       return true
     }
     if let html = item.data(forType: .html),
-       let attributed = NSAttributedString(html: html, documentAttributes: nil),
-       !attributed.string.isEmpty {
+      let attributed = NSAttributedString(html: html, documentAttributes: nil),
+      !attributed.string.isEmpty
+    {
       return true
     }
     return false

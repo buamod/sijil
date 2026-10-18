@@ -150,10 +150,12 @@ public actor VaultStore {
           lastUsedAt: note.createdAt,
           sourceBundleID: note.sourceBundleID,
           sourceAppName: note.sourceAppName,
-          contents: [ClipContent(
-            type: PasteboardType.string.rawValue,
-            value: Data(note.body.utf8)
-          )],
+          contents: [
+            ClipContent(
+              type: PasteboardType.string.rawValue,
+              value: Data(note.body.utf8)
+            )
+          ],
           pinned: note.pinned,
           locked: note.locked,
           // Imported items never carry resurrection rights, so they cannot
@@ -200,7 +202,8 @@ public actor VaultStore {
     // Only local captures are re-armed: an imported item has no local
     // obligation to re-publish.
     let known = try store.recent(limit: 100_000, includeUnpinnedOnly: false)
-    return known
+    return
+      known
       .filter { $0.isFromLocalCapture && !present.contains($0.id) }
       .map(\.id)
   }

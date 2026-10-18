@@ -75,7 +75,7 @@ struct VaultNoteTests {
   @Test("Binary clips get an asset and an embed")
   func binaryClipsReferenceAssets() throws {
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47]))
     ])
     let note = VaultNote.encode(item)
 
@@ -90,10 +90,10 @@ struct VaultNoteTests {
   @Test("Asset names are content-addressed")
   func assetsAreContentAddressed() throws {
     let first = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3]))
     ])
     let second = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3]))
     ])
     #expect(VaultNote.assetName(for: first) == VaultNote.assetName(for: second))
   }

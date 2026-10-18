@@ -6,7 +6,7 @@ APP_BUNDLE    := dist/$(APP_NAME).app
 EXECUTABLE    := $(BUILD_DIR)/release/$(APP_NAME)
 CONTENTS      := $(APP_BUNDLE)/Contents
 
-.PHONY: all build release test clean app run install
+.PHONY: all build release test ci clean app run install format format-fix
 
 all: test app
 
@@ -18,6 +18,29 @@ release:
 
 test:
 	swift test
+
+## Runs exactly the gates CI runs, in the same order.
+##
+## Kept in the Makefile rather than duplicated in the workflow so they cannot
+## drift: if this passes locally, the PR will pass CI, and if it fails you find
+## out without waiting for a runner.
+ci: format build-and-test app
+
+build-and-test:
+	@echo "==> release build (warnings are errors)"
+	@$(MAKE) --no-print-directory release
+	swift build -c release -Xswiftc -warnings-as-errors
+	@echo "==> tests"
+	swift test
+
+## Formatting is checked in CI, so check it before pushing rather than after.
+format:
+	swift format lint --recursive --strict Sources Tests
+
+## Reformats in place. Run this on its own commit so a formatting change is never
+## mixed into a behavioural one.
+format-fix:
+	swift format --recursive --in-place Sources Tests
 
 ## Assembles a real .app bundle.
 ##

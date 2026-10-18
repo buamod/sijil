@@ -15,13 +15,14 @@ enum Digest {
   /// Sorting by (type, per-blob hash) before combining means a copy that the
   /// source app advertises in a different type order still hashes identically.
   static func identity(of contents: some Sequence<ClipContent>) -> String {
-    let parts = contents
+    let parts =
+      contents
       .map { "\($0.type):\(hex($0.value))" }
       .sorted()
     var hasher = SHA256()
     for part in parts {
       hasher.update(data: Data(part.utf8))
-      hasher.update(data: Data([0x1F])) // unit separator, so parts cannot run together
+      hasher.update(data: Data([0x1F]))  // unit separator, so parts cannot run together
     }
     return hex(Data(hasher.finalize()))
   }

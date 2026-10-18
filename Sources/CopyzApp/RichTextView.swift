@@ -37,7 +37,8 @@ struct RichTextView: NSViewRepresentable {
     let selected = textView.selectedRange()
     textView.textStorage?.setAttributedString(attributed)
     textView.setSelectedRange(
-      selected.location <= textView.textStorage?.length ?? 0 ? selected : NSRange(location: 0, length: 0)
+      selected.location <= textView.textStorage?.length ?? 0
+        ? selected : NSRange(location: 0, length: 0)
     )
   }
 }

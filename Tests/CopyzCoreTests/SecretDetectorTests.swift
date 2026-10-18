@@ -30,7 +30,8 @@ struct SecretDetectorTests {
   @Test("A JWT is detected via its decoded header")
   func jwt() {
     // {"alg":"HS256","typ":"JWT"} / {"sub":"1234"} / signature
-    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    let token =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
       + ".eyJzdWIiOiIxMjM0NTY3ODkwIn0"
       + ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
     #expect(detector.detect(in: "Authorization: Bearer \(token)") == .jwt)
@@ -38,7 +39,8 @@ struct SecretDetectorTests {
 
   @Test("A bare JWT with no header prefix is still caught")
   func bareJWT() {
-    let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+    let token =
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
       + ".eyJzdWIiOiIxMjM0NTY3ODkwIn0"
       + ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
     #expect(detector.detect(in: token) == .jwt)
@@ -85,7 +87,8 @@ struct SecretDetectorTests {
   @Test("URLs with embedded credentials are detected")
   func basicAuthURL() {
     #expect(detector.detect(in: "https://admin:s3cr3t@example.com/dashboard") == .basicAuthURL)
-    #expect(detector.detect(in: "postgres://user:hunter2@db.internal:5432/app") == .connectionString)
+    #expect(
+      detector.detect(in: "postgres://user:hunter2@db.internal:5432/app") == .connectionString)
     #expect(detector.detect(in: "mysql://root:rootpw@localhost/mydb?password=abc123xyz") != nil)
   }
 
@@ -221,9 +224,9 @@ struct SecretDetectorTests {
   @Test("Low-entropy assignments are left alone")
   func weakAssignmentsSurvive() {
     let samples = [
-      #"password = "hunter2""#,       // classic placeholder
-      "password: correcthorse",         // two dictionary words
-      "secret = mysecret",              // repeats itself
+      #"password = "hunter2""#,  // classic placeholder
+      "password: correcthorse",  // two dictionary words
+      "secret = mysecret",  // repeats itself
       "token: undefined",
       "auth = Bearer",
     ]

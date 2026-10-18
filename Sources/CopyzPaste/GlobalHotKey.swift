@@ -66,44 +66,48 @@ public final class GlobalHotKey {
     pressHandler = onPress
     releaseHandler = onRelease
 
-    var kinds = [EventTypeSpec(
-      eventClass: OSType(kEventClassKeyboard),
-      eventKind: UInt32(kEventHotKeyPressed)
-    )]
-    var releaseKind = [EventTypeSpec(
-      eventClass: OSType(kEventClassKeyboard),
-      eventKind: UInt32(kEventHotKeyReleased)
-    )]
+    var kinds = [
+      EventTypeSpec(
+        eventClass: OSType(kEventClassKeyboard),
+        eventKind: UInt32(kEventHotKeyPressed)
+      )
+    ]
+    var releaseKind = [
+      EventTypeSpec(
+        eventClass: OSType(kEventClassKeyboard),
+        eventKind: UInt32(kEventHotKeyReleased)
+      )
+    ]
 
     let status = InstallEventHandler(
       GetEventDispatcherTarget(),
       // `EventRef` is an opaque pointer with no Swift-side accessors, so pressed and
-    // released are told apart by installing one handler per event kind rather
-    // than by inspecting the event at runtime.
-    { _, event, userData in
-      guard let event, let userData else { return OSStatus(noErr) }
-      var hotKeyID = EventHotKeyID()
-      let result = GetEventParameter(
-        event,
-        EventParamName(kEventParamDirectObject),
-        EventParamType(typeEventHotKeyID),
-        nil,
-        MemoryLayout<EventHotKeyID>.size,
-        nil,
-        &hotKeyID
-      )
-      guard result == noErr, hotKeyID.signature == GlobalHotKey.signature else {
-        return OSStatus(eventNotHandledErr)
-      }
+      // released are told apart by installing one handler per event kind rather
+      // than by inspecting the event at runtime.
+      { _, event, userData in
+        guard let event, let userData else { return OSStatus(noErr) }
+        var hotKeyID = EventHotKeyID()
+        let result = GetEventParameter(
+          event,
+          EventParamName(kEventParamDirectObject),
+          EventParamType(typeEventHotKeyID),
+          nil,
+          MemoryLayout<EventHotKeyID>.size,
+          nil,
+          &hotKeyID
+        )
+        guard result == noErr, hotKeyID.signature == GlobalHotKey.signature else {
+          return OSStatus(eventNotHandledErr)
+        }
 
-      let owner = Unmanaged<GlobalHotKey>.fromOpaque(userData).takeUnretainedValue()
-      MainActor.assumeIsolated { owner.pressHandler?() }
-      return OSStatus(noErr)
-    },
-    2,
-    &kinds,
-    Unmanaged.passUnretained(self).toOpaque(),
-    &pressHandlerRef
+        let owner = Unmanaged<GlobalHotKey>.fromOpaque(userData).takeUnretainedValue()
+        MainActor.assumeIsolated { owner.pressHandler?() }
+        return OSStatus(noErr)
+      },
+      2,
+      &kinds,
+      Unmanaged.passUnretained(self).toOpaque(),
+      &pressHandlerRef
     )
 
     // Second handler for release, which is what quick mode needs in order to

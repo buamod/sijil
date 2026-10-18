@@ -72,7 +72,8 @@ public final class ClipboardService {
   static func unavailable(settings: Settings) -> ClipboardService {
     let scratch = FileManager.default.temporaryDirectory
       .appending(path: "copyz-degraded-\(UUID().uuidString)", directoryHint: .isDirectory)
-    let store = (try? SQLiteClipStore(inMemory: true))
+    let store =
+      (try? SQLiteClipStore(inMemory: true))
       ?? (try? SQLiteClipStore(path: scratch.appending(path: "scratch.sqlite").path))
     // `SQLiteClipStore.inMemory` cannot fail in practice; the fallback exists so
     // this function has no throwing path at all.
@@ -233,10 +234,12 @@ public final class ClipboardService {
     let item = ClipItem(
       sourceBundleID: source?.sourceBundleID,
       sourceAppName: source?.sourceAppName,
-      contents: [ClipContent(
-        type: PasteboardType.string.rawValue,
-        value: Data(text.utf8)
-      )]
+      contents: [
+        ClipContent(
+          type: PasteboardType.string.rawValue,
+          value: Data(text.utf8)
+        )
+      ]
     )
     do {
       let stored = try store.record(item)

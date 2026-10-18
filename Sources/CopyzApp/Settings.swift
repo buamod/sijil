@@ -68,11 +68,13 @@ public final class Settings {
   public init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
 
-    let decodedRules = Self.read(CaptureRules.self, from: defaults, key: Keys.rules)
+    let decodedRules =
+      Self.read(CaptureRules.self, from: defaults, key: Keys.rules)
       ?? CaptureRules()
     // A previously-saved rule set must not resurrect capture as paused.
     self.rules = decodedRules.isCapturing ? decodedRules : CaptureRules()
-    self.retention = Self.read(RetentionPolicy.self, from: defaults, key: Keys.retention)
+    self.retention =
+      Self.read(RetentionPolicy.self, from: defaults, key: Keys.retention)
       ?? RetentionPolicy()
     self.pollInterval = defaults.object(forKey: Keys.pollInterval) as? TimeInterval ?? 0.4
     self.vaultRootPath = defaults.string(forKey: Keys.vaultRoot)
@@ -100,12 +102,13 @@ public final class Settings {
   /// no TCC grant. Deliberately *not* `~/Documents`, which would trigger a
   /// Files-and-Folders prompt for no benefit.
   public var defaultVaultURL: URL {
-    let base = (try? FileManager.default.url(
-      for: .applicationSupportDirectory,
-      in: .userDomainMask,
-      appropriateFor: nil,
-      create: true
-    )) ?? URL(fileURLWithPath: NSTemporaryDirectory())
+    let base =
+      (try? FileManager.default.url(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask,
+        appropriateFor: nil,
+        create: true
+      )) ?? URL(fileURLWithPath: NSTemporaryDirectory())
     return base.appending(path: "copyz/Vault", directoryHint: .isDirectory)
   }
 

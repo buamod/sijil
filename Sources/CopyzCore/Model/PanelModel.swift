@@ -98,7 +98,9 @@ public final class PanelModel {
   /// Showing an empty bucket that cannot be selected is just noise, but
   /// collections are always listed: an empty one still needs to be selectable
   /// so a clip can be filed into it.
-  private static func computeScopes(items: [ClipItem], collections: [Collection]) -> [(Scope, String)] {
+  private static func computeScopes(
+    items: [ClipItem], collections: [Collection]
+  ) -> [(Scope, String)] {
     var result: [(Scope, String)] = []
     if items.contains(where: \.pinned) { result.append((.pinned, "Pinned")) }
     if items.contains(where: \.locked) { result.append((.locked, "Locked")) }
@@ -110,7 +112,8 @@ public final class PanelModel {
       counts[id, default: 0] += 1
     }
     for collection in collections {
-      result.append((.collection(collection.id), "\(collection.name) (\(counts[collection.id] ?? 0))"))
+      result.append(
+        (.collection(collection.id), "\(collection.name) (\(counts[collection.id] ?? 0))"))
     }
     return result
   }
@@ -150,7 +153,8 @@ public final class PanelModel {
     // A collection that was deleted while selected must not stay selected, or
     // the sidebar would highlight a row that no longer exists.
     if case .collection(let id) = scope,
-       !newCollections.contains(where: { $0.id == id }) {
+      !newCollections.contains(where: { $0.id == id })
+    {
       scope = .all
     }
     refreshDerived()

@@ -72,7 +72,7 @@ struct PanelPerformanceTests {
       ClipItem(
         contents: [ClipContent(type: PasteboardType.string.rawValue, value: Data("a".utf8))],
         collection: work.id.uuidString
-      ),
+      )
     ])
     #expect(model.scopes.first { $0.0 == .collection(work.id) }?.1 == "Work (1)")
 

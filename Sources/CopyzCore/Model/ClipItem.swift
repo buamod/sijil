@@ -164,8 +164,9 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
       if Self.isHexColor(text) { return .color }
       if Self.isEmojiOnly(text) { return .emoji }
       if let url = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
-         url.scheme != nil,
-         (text.contains("://") || url.scheme?.hasPrefix("mailto") == true) {
+        url.scheme != nil,
+        (text.contains("://") || url.scheme?.hasPrefix("mailto") == true)
+      {
         return .link
       }
     }
@@ -184,12 +185,15 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
     }
     let lower = trimmed.lowercased()
     let isRGB = lower.hasPrefix("rgb(") || lower.hasPrefix("rgba(")
-    if isRGB, let open = lower.firstIndex(of: "("), let close = lower.lastIndex(of: ")"), open < close {
+    if isRGB, let open = lower.firstIndex(of: "("), let close = lower.lastIndex(of: ")"),
+      open < close
+    {
       let parts = lower[lower.index(after: open)..<close].split(separator: ",")
-      return (3...4).contains(parts.count) && parts.allSatisfy {
-        $0.trimmingCharacters(in: .whitespaces).hasSuffix("%")
-          || Double($0.trimmingCharacters(in: .whitespaces)) != nil
-      }
+      return (3...4).contains(parts.count)
+        && parts.allSatisfy {
+          $0.trimmingCharacters(in: .whitespaces).hasSuffix("%")
+            || Double($0.trimmingCharacters(in: .whitespaces)) != nil
+        }
     }
     return false
   }
@@ -202,7 +206,8 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
     var sawEmoji = false
     for cluster in trimmed.unicodeScalars {
       let value = cluster.value
-      let isEmoji = (0x1F300...0x1FAFF).contains(value)
+      let isEmoji =
+        (0x1F300...0x1FAFF).contains(value)
         || (0x2600...0x27BF).contains(value)
         || (0x2190...0x21FF).contains(value)
         || (0x2B00...0x2BFF).contains(value)
@@ -215,7 +220,9 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
 
   static func makeTitle(from contents: [ClipContent]) -> String {
     func text(of type: PasteboardType) -> String? {
-      guard let data = contents.first(where: { $0.type == type.rawValue })?.value else { return nil }
+      guard let data = contents.first(where: { $0.type == type.rawValue })?.value else {
+        return nil
+      }
       return String(data: data, encoding: .utf8)
     }
 
@@ -224,15 +231,17 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
     let candidate: String? =
       text(of: .string)
       ?? contents
-        .first { $0.type == PasteboardType.rtf.rawValue || $0.type == PasteboardType.rtfd.rawValue }
-        .flatMap { NSAttributedString(rtf: $0.value, documentAttributes: nil)?.string }
+      .first { $0.type == PasteboardType.rtf.rawValue || $0.type == PasteboardType.rtfd.rawValue }
+      .flatMap { NSAttributedString(rtf: $0.value, documentAttributes: nil)?.string }
       ?? contents
-        .first { $0.type == PasteboardType.html.rawValue }
-        .flatMap { NSAttributedString(html: $0.value, documentAttributes: nil)?.string }
+      .first { $0.type == PasteboardType.html.rawValue }
+      .flatMap { NSAttributedString(html: $0.value, documentAttributes: nil)?.string }
       ?? contents
-        .filter { $0.type == PasteboardType.fileURL.rawValue }
-        .compactMap { URL(dataRepresentation: $0.value, relativeTo: nil, isAbsolute: true)?.lastPathComponent }
-        .first
+      .filter { $0.type == PasteboardType.fileURL.rawValue }
+      .compactMap {
+        URL(dataRepresentation: $0.value, relativeTo: nil, isAbsolute: true)?.lastPathComponent
+      }
+      .first
 
     guard let candidate, !candidate.isEmpty else { return "" }
     return TextSanitizer.previewLine(candidate)
@@ -243,13 +252,15 @@ public struct ClipItem: Sendable, Identifiable, Hashable {
   public var vaultBody: String {
     if let plainText { return plainText }
     if let htmlData,
-       let attributed = NSAttributedString(html: htmlData, documentAttributes: nil),
-       !attributed.string.isEmpty {
+      let attributed = NSAttributedString(html: htmlData, documentAttributes: nil),
+      !attributed.string.isEmpty
+    {
       return attributed.string
     }
     if let rtfData,
-       let attributed = NSAttributedString(rtf: rtfData, documentAttributes: nil),
-       !attributed.string.isEmpty {
+      let attributed = NSAttributedString(rtf: rtfData, documentAttributes: nil),
+      !attributed.string.isEmpty
+    {
       return attributed.string
     }
     if !fileURLs.isEmpty {

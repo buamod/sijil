@@ -8,7 +8,7 @@ import Testing
 struct ClipPreviewTests {
   private func text(_ value: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(value.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(value.utf8))
     ])
   }
 
@@ -23,7 +23,7 @@ struct ClipPreviewTests {
       ClipContent(
         type: PasteboardType.html.rawValue,
         value: Data("<b>bold</b> text".utf8)
-      ),
+      )
     ])
     #expect(ClipPreview.text(for: item) == "bold text")
   }
@@ -32,7 +32,7 @@ struct ClipPreviewTests {
   func fileFallback() {
     let url = URL(fileURLWithPath: "/tmp/report.pdf")
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.fileURL.rawValue, value: url.dataRepresentation),
+      ClipContent(type: PasteboardType.fileURL.rawValue, value: url.dataRepresentation)
     ])
     #expect(ClipPreview.text(for: item) == "/tmp/report.pdf")
   }
@@ -49,7 +49,7 @@ struct ClipPreviewTests {
     #expect(full != nil)
 
     // 0xDD is 221, so alpha is 221/255 — opaque-ish but not fully opaque, which is
-// what proves the alpha byte was read rather than ignored.
+    // what proves the alpha byte was read rather than ignored.
     let rgba = NSColor(cssHex: "#AABBCCDD")
     #expect(rgba != nil)
     let alpha = rgba?.alphaComponent ?? 0
@@ -105,13 +105,14 @@ struct ClipPreviewTests {
   @Test("Image preview decodes image payloads")
   func imagePreview() {
     // A 1x1 transparent PNG.
-    let base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    let base64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
     guard let data = Data(base64Encoded: base64) else {
       Issue.record("bad fixture")
       return
     }
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: data),
+      ClipContent(type: PasteboardType.png.rawValue, value: data)
     ])
     #expect(ClipPreview.image(for: item) != nil)
     #expect(ClipPreview.image(for: text("not an image")) == nil)

@@ -213,7 +213,7 @@ public enum PasteEngine {
         keyboardLayout,
         ansiKeyCode,
         UInt16(kUCKeyActionDisplay),
-        0, // no modifiers: we supply ⌘ ourselves
+        0,  // no modifiers: we supply ⌘ ourselves
         UInt32(LMGetKbdType()),
         0,
         nil,

@@ -18,7 +18,7 @@ struct MaintenanceTests {
 
   private func textItem(_ text: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8))
     ])
   }
 
@@ -94,7 +94,9 @@ struct MaintenanceTests {
     defer { try? FileManager.default.removeItem(at: dir) }
 
     for index in 0..<100 { _ = try store.record(textItem("findable-\(index)")) }
-    for index in 0..<90 { try store.delete(id: try #require(store.search("findable", limit: 100).last).id) }
+    for index in 0..<90 {
+      try store.delete(id: try #require(store.search("findable", limit: 100).last).id)
+    }
 
     try store.compact(force: true)
 
@@ -199,7 +201,7 @@ struct DeletionDurabilityTests {
     try await vault.prepare()
 
     let clip = ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data("secret meeting notes".utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data("secret meeting notes".utf8))
     ])
     _ = try store.record(clip)
     _ = await vault.flushNow()
@@ -235,10 +237,10 @@ struct DeletionDurabilityTests {
     try await vault.prepare()
 
     let keep = ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data("keep this".utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data("keep this".utf8))
     ])
     let drop = ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data("delete this".utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data("delete this".utf8))
     ])
     _ = try store.record(keep)
     _ = try store.record(drop)

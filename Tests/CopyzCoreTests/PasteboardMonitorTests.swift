@@ -118,7 +118,8 @@ struct PasteboardMonitorTests {
 
     let item = NSPasteboardItem()
     item.setString("copyz wrote this", forType: .string)
-    item.setData(Data("1".utf8), forType: NSPasteboard.PasteboardType(PasteboardType.selfMarker.rawValue))
+    item.setData(
+      Data("1".utf8), forType: NSPasteboard.PasteboardType(PasteboardType.selfMarker.rawValue))
     pasteboard.clearContents()
     pasteboard.writeObjects([item])
 

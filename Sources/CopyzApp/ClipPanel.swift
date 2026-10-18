@@ -63,8 +63,10 @@ struct ClipListView: View {
 
       if !model.scopes.filter({ $0.0 == .pinned || $0.0 == .locked }).isEmpty {
         Section {
-          ForEach(model.scopes.filter { $0.0 == .pinned || $0.0 == .locked },
-                  id: \.0) { entry in
+          ForEach(
+            model.scopes.filter { $0.0 == .pinned || $0.0 == .locked },
+            id: \.0
+          ) { entry in
             Label(entry.1, systemImage: entry.0 == .pinned ? "pin.fill" : "lock.fill")
               .tag(entry.0)
           }
@@ -72,8 +74,10 @@ struct ClipListView: View {
       }
 
       Section("Collections") {
-        ForEach(model.scopes.filter { if case .collection = $0.0 { true } else { false } },
-                id: \.0) { entry in
+        ForEach(
+          model.scopes.filter { if case .collection = $0.0 { true } else { false } },
+          id: \.0
+        ) { entry in
           Label(entry.1, systemImage: "folder")
             .tag(entry.0)
             .contextMenu {

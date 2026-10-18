@@ -31,7 +31,8 @@ public enum VaultNote {
     let parts = calendar.dateComponents([.year, .month, .day], from: createdAt)
     let day = String(format: "%02d", parts.day ?? 1)
     let month = String(format: "%02d", parts.month ?? 1)
-    return "Clips/\(parts.year ?? 1970)/\(month)/\(day)/\(fileName(createdAt: createdAt, contentHash: contentHash))"
+    return
+      "Clips/\(parts.year ?? 1970)/\(month)/\(day)/\(fileName(createdAt: createdAt, contentHash: contentHash))"
   }
 
   public static func relativePath(for item: ClipItem) -> String {
@@ -143,7 +144,8 @@ public enum VaultNote {
   /// is left alone rather than mangled.
   public static func decode(_ text: String) -> Decoded? {
     guard text.hasPrefix("---\n") else { return nil }
-    guard let closingRange = text.range(of: "\n---\n", range: text.startIndex..<text.endIndex) else {
+    guard let closingRange = text.range(of: "\n---\n", range: text.startIndex..<text.endIndex)
+    else {
       return nil
     }
 
@@ -172,8 +174,8 @@ public enum VaultNote {
     }
 
     guard let idString = fields["id"], let id = UUID(uuidString: idString),
-          let hash = fields["sha256"],
-          let kindRaw = fields["kind"], let kind = ClipKind(rawValue: kindRaw)
+      let hash = fields["sha256"],
+      let kindRaw = fields["kind"], let kind = ClipKind(rawValue: kindRaw)
     else { return nil }
 
     let createdAt = fields["ts"].flatMap { makeISOFormatter().date(from: $0) } ?? Date()
@@ -221,7 +223,8 @@ public enum VaultNote {
 
   /// Double-quotes a YAML scalar, escaping anything that would break parsing.
   static func yamlQuoted(_ value: String) -> String {
-    let escaped = value
+    let escaped =
+      value
       .replacingOccurrences(of: "\\", with: "\\\\")
       .replacingOccurrences(of: "\"", with: "\\\"")
       .replacingOccurrences(of: "\n", with: "\\n")

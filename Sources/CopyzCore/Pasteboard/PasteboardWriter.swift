@@ -28,7 +28,8 @@ public enum PasteboardWriter {
 
     var wroteAnything = false
     for content in contents where content.type != PasteboardType.fileURL.rawValue {
-      guard pasteboard.setData(content.value, forType: NSPasteboard.PasteboardType(content.type)) else {
+      guard pasteboard.setData(content.value, forType: NSPasteboard.PasteboardType(content.type))
+      else {
         continue
       }
       wroteAnything = true
@@ -54,7 +55,8 @@ public enum PasteboardWriter {
     // Empty string, but presence is the signal — that is what the monitor
     // checks for.
     pasteboard.setString("", forType: .selfMarker)
-    pasteboard.setString(item.sourceBundleID ?? "", forType: NSPasteboard.PasteboardType("org.nspasteboard.source"))
+    pasteboard.setString(
+      item.sourceBundleID ?? "", forType: NSPasteboard.PasteboardType("org.nspasteboard.source"))
 
     return wroteAnything
   }

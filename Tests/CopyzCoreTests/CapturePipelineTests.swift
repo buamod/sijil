@@ -52,7 +52,7 @@ struct CapturePipelineTests {
   @Test("An AWS key on the pasteboard is dropped, not stored")
   func awsKeyDropped() {
     let outcome = extract([
-      makeItem(text: "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"),
+      makeItem(text: "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE")
     ])
     #expect(outcome?.rejection == .secretDetected(.awsAccessKey))
     #expect(outcome?.item.contents.isEmpty == true, "nothing may reach the store")
@@ -79,7 +79,7 @@ struct CapturePipelineTests {
   @Test("Ordinary text still gets through")
   func ordinaryTextCaptured() {
     let outcome = extract([
-      makeItem(text: "https://github.com/foo/barbaz1234/pull/5678"),
+      makeItem(text: "https://github.com/foo/barbaz1234/pull/5678")
     ])
     #expect(outcome?.rejection == nil)
     #expect(outcome?.item.contents.count == 1)

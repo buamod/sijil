@@ -42,7 +42,8 @@ final class TransformModel {
     let text = ClipPreview.text(for: item) ?? item.title
 
     let trimmed = query.trimmingCharacters(in: .whitespaces)
-    let candidates = trimmed.isEmpty
+    let candidates =
+      trimmed.isEmpty
       ? TransformCatalog.all
       : TransformCatalog.all.filter {
         $0.name.localizedCaseInsensitiveContains(trimmed)

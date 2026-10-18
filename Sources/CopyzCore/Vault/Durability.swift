@@ -38,11 +38,13 @@ enum Durability {
     // rename crosses a filesystem boundary and stops being atomic.
     let temporary = directory.appending(path: "\(tempPrefix)\(UUID().uuidString)")
 
-    guard FileManager.default.createFile(
-      atPath: temporary.path,
-      contents: nil,
-      attributes: [.posixPermissions: 0o600]
-    ) else {
+    guard
+      FileManager.default.createFile(
+        atPath: temporary.path,
+        contents: nil,
+        attributes: [.posixPermissions: 0o600]
+      )
+    else {
       throw Failure.couldNotCreate(url)
     }
 

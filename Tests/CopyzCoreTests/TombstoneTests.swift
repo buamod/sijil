@@ -37,10 +37,12 @@ struct TombstoneTests {
     let reimported = ClipItem(
       id: clip.id,
       createdAt: clip.createdAt,
-      contents: [ClipContent(
-        type: PasteboardType.string.rawValue,
-        value: Data("delete me".utf8)
-      )],
+      contents: [
+        ClipContent(
+          type: PasteboardType.string.rawValue,
+          value: Data("delete me".utf8)
+        )
+      ],
       isFromLocalCapture: false
     )
     _ = try store.record(reimported)

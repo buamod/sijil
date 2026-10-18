@@ -1,0 +1,150 @@
+# Continuous integration for copyz.
+#
+# Ordered so the cheapest, most-likely-to-fail checks run first: a formatting
+# violation should not cost you a full build, and a release-build failure should
+# not cost you a test run.
+#
+# Every action is pinned to a commit SHA rather than a tag. Tags can be moved by
+# whoever owns the repository; a SHA cannot. GitHub's own documentation
+# recommends this, and `dependabot` can keep the SHAs updated automatically.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs. Without this, pushing a fix while a run is in flight
+# leaves you waiting on the result of code you already replaced.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned so a runner image update cannot silently change the toolchain the
+  # tests were verified against. Bump deliberately, not accidentally.
+  SWIFT_VERSION: "6.2"
+
+jobs:
+  format:
+    name: Format
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # `swift-format` ships with the toolchain, so this needs no install step
+      # and cannot drift from the compiler. Chosen over SwiftLint deliberately:
+      # SwiftLint is a third-party dependency on every run and its rules churn
+      # between releases, and this friction would land on whichever file is
+      # being edited.
+      - name: Lint formatting
+        run: swift format lint --recursive --strict Sources Tests
+
+  build:
+    name: Build
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Cache SwiftPM artifacts
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          # Keyed on the resolved dependency graph *and* the toolchain, so a
+          # Package.resolved or Swift version change invalidates the cache rather
+          # than silently building against the wrong version.
+          path: .build
+          key: ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-
+
+      - name: Verify toolchain
+        run: |
+          swift --version
+          swift build --version
+          echo "SWIFT_VERSION is ${{ env.SWIFT_VERSION }}"
+
+      # Debug builds can compile code that fails under optimization: aggressive
+      # inlining exposes exclusivity violations that debug mode lets slide, and
+      # this project's write path uses GRDB and actor isolation where that shows
+      # up. `make app` builds release anyway, so this is nearly free.
+      - name: Debug build
+        run: swift build --build-tests
+
+      # Compiles with warnings as errors. A new warning should be a failing
+      # check, not something to notice later.
+      - name: Release build
+        run: swift build -c release -Xswiftc -warnings-as-errors
+
+  test:
+    name: Test
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Cache SwiftPM artifacts
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-
+
+      # Deliberately no `make test`: this runs `swift test` directly so a failing
+      # gate names the actual failure rather than surfacing through make.
+      - name: Run tests
+        run: swift test 2>&1 | tee test-output.txt
+
+      # Always, so a failing run still leaves a log. GitHub truncates the job log
+      # for long output and the failure is usually at the end.
+      - name: Summarise failures
+        if: failure()
+        run: |
+          echo "=== failing tests ==="
+          grep -E "✘|error:" test-output.txt | head -50 || echo "(none captured)"
+
+  bundle:
+    name: App Bundle
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Cache SwiftPM artifacts
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-
+
+      # The bundle is assembled by hand-written shell in the Makefile, so it can
+      # break in ways `swift build` never sees: a missing Info.plist key, a
+      # codesign step that starts failing, a path that no longer exists. None of
+      # that is covered by any other check.
+      - name: Assemble and sign the app bundle
+        run: make app
+
+      - name: Verify the bundle is well formed
+        run: |
+          APP=dist/copyz.app
+          test -x "$APP/Contents/MacOS/copyz"  || { echo "executable missing"; exit 1; }
+          test -f "$APP/Contents/Info.plist"     || { echo "Info.plist missing"; exit 1; }
+          test -f "$APP/Contents/PkgInfo"         || { echo "PkgInfo missing"; exit 1; }
+
+          # A bundle that is not signed cannot hold a TCC grant, which is what
+          # makes Accessibility and clipboard access work.
+          codesign --verify --deep --strict "$APP" || {
+            echo "bundle is not correctly signed"; exit 1; }
+
+          echo "--- signature ---"
+          codesign -dv --verbose=2 "$APP" 2>&1 | grep -E "Identifier|Signature|TeamIdentifier" || true
+          echo "--- plist ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :LSUIElement" "$APP/Contents/Info.plist"

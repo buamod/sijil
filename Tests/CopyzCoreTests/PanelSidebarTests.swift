@@ -17,7 +17,7 @@ struct PanelSidebarTests {
   ) -> ClipItem {
     ClipItem(
       contents: [
-        ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8)),
+        ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8))
       ],
       pinned: pinned,
       locked: locked,

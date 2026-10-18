@@ -173,7 +173,8 @@ public actor CollectionStore {
     self.fileURL = sidecarURL
     self.fileManager = fileManager
     if let sidecarURL, let data = try? Data(contentsOf: sidecarURL),
-       let decoded = try? Self.decoder.decode(VaultSidecar.self, from: data) {
+      let decoded = try? Self.decoder.decode(VaultSidecar.self, from: data)
+    {
       self.sidecar = decoded
     } else {
       self.sidecar = VaultSidecar()
@@ -249,7 +250,8 @@ public actor CollectionStore {
   }
 
   public func setPinned(_ pinned: Bool, clipID: UUID) {
-    var record = sidecar.pins[clipID]
+    var record =
+      sidecar.pins[clipID]
       ?? PinRecord(clipID: clipID, pinned: pinned)
     record.pinned = pinned
     record.updatedAt = Date()
@@ -258,7 +260,8 @@ public actor CollectionStore {
 
   /// Files a clip into a collection. Passing nil un-files it.
   public func setCollection(_ collectionID: UUID?, clipID: UUID) {
-    var record = sidecar.pins[clipID]
+    var record =
+      sidecar.pins[clipID]
       ?? PinRecord(clipID: clipID, pinned: false)
     record.collectionID = collectionID
     record.updatedAt = Date()
@@ -303,7 +306,10 @@ public actor CollectionStore {
     // Adopt peers' watermarks and epochs so collection knows who has seen what.
     for (device, watermark) in incoming.watermarks where device != sidecar.recordedDeviceID {
       if let existing = sidecar.watermarks[device],
-         existing.updatedAt > watermark.updatedAt { continue }
+        existing.updatedAt > watermark.updatedAt
+      {
+        continue
+      }
       sidecar.watermarks[device] = watermark
     }
     for (device, epoch) in incoming.deviceEpochs {

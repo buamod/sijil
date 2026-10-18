@@ -20,13 +20,15 @@ public enum ClipPreview {
   public static func text(for item: ClipItem) -> String? {
     if let text = item.plainText, !text.isEmpty { return text }
     if let rtf = item.rtfData,
-       let attributed = NSAttributedString(rtf: rtf, documentAttributes: nil),
-       !attributed.string.isEmpty {
+      let attributed = NSAttributedString(rtf: rtf, documentAttributes: nil),
+      !attributed.string.isEmpty
+    {
       return attributed.string
     }
     if let html = item.htmlData,
-       let attributed = NSAttributedString(html: html, documentAttributes: nil),
-       !attributed.string.isEmpty {
+      let attributed = NSAttributedString(html: html, documentAttributes: nil),
+      !attributed.string.isEmpty
+    {
       return attributed.string
     }
     if !item.fileURLs.isEmpty {
@@ -110,7 +112,7 @@ extension NSColor {
     }
 
     guard text.hasPrefix("rgb"), let open = text.firstIndex(of: "("),
-          let close = text.lastIndex(of: ")"), open < close
+      let close = text.lastIndex(of: ")"), open < close
     else { return nil }
 
     let parts = text[text.index(after: open)..<close]

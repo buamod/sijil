@@ -7,7 +7,7 @@ import Testing
 struct ClipItemTests {
   private func text(_ value: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(value.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(value.utf8))
     ])
   }
 
@@ -50,7 +50,7 @@ struct ClipItemTests {
   @Test("Image payloads classify as images")
   func images() {
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50]))
     ])
     #expect(item.kind == .image)
   }
@@ -64,7 +64,7 @@ struct ClipItemTests {
     )
     guard let rtf else { return }
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.rtf.rawValue, value: rtf),
+      ClipContent(type: PasteboardType.rtf.rawValue, value: rtf)
     ])
     #expect(item.kind == .richText)
   }
@@ -85,7 +85,7 @@ struct ClipItemTests {
   func singleFile() {
     let url = URL(fileURLWithPath: "/tmp/only.txt")
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.fileURL.rawValue, value: url.dataRepresentation),
+      ClipContent(type: PasteboardType.fileURL.rawValue, value: url.dataRepresentation)
     ])
     #expect(item.kind == .file)
   }

@@ -255,11 +255,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// sheet on a non-activating panel is awkward to drive.
   private func promptForCollectionName() {
     guard let service else { return }
-    guard let name = Self.askForText(
-      title: "New Collection",
-      message: "Name",
-      initial: ""
-    ) else { return }
+    guard
+      let name = Self.askForText(
+        title: "New Collection",
+        message: "Name",
+        initial: ""
+      )
+    else { return }
 
     Task { @MainActor in
       _ = await service.makeCollection(name: name)
@@ -271,11 +273,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func promptForRename(_ id: UUID) {
     guard let service else { return }
     let current = TaskCache.shared.collections.first { $0.id == id }?.name ?? ""
-    guard let name = Self.askForText(
-      title: "Rename Collection",
-      message: "Name",
-      initial: current
-    ) else { return }
+    guard
+      let name = Self.askForText(
+        title: "Rename Collection",
+        message: "Name",
+        initial: current
+      )
+    else { return }
 
     Task { @MainActor in
       await service.renameCollection(id, to: name)
@@ -556,7 +560,8 @@ struct CaptureSettings: View {
     Form {
       Toggle("Record clipboard history", isOn: $settings.rules.isCapturing)
       Toggle("Record images", isOn: $settings.rules.capturesImages)
-      Toggle("Ignore Universal Clipboard (Handoff)", isOn: $settings.rules.ignoresUniversalClipboard)
+      Toggle(
+        "Ignore Universal Clipboard (Handoff)", isOn: $settings.rules.ignoresUniversalClipboard)
       Picker("Check interval", selection: $settings.pollInterval) {
         Text("Fast (0.2s)").tag(TimeInterval(0.2))
         Text("Normal (0.4s)").tag(TimeInterval(0.4))

@@ -74,7 +74,7 @@ struct ClipboardServiceTests {
 
   private func textItem(_ text: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8))
     ])
   }
 
@@ -220,7 +220,8 @@ struct ClipboardServiceTests {
       #expect(await harness.service.flushVault() == 0, "nothing can be written")
 
       #expect(try harness.store.count() == 3, "clips must survive an unreachable vault")
-      #expect(try harness.store.pendingExport(limit: 10).count == 3, "obligations must remain armed")
+      #expect(
+        try harness.store.pendingExport(limit: 10).count == 3, "obligations must remain armed")
     }
   }
 
@@ -313,7 +314,9 @@ struct SettingsReactivityTests {
     return .init(service: service, store: store, root: root, settings: settings)
   }
 
-  private func withHarness(_ body: (ClipboardServiceTests.Harness) async throws -> Void) async throws {
+  private func withHarness(
+    _ body: (ClipboardServiceTests.Harness) async throws -> Void
+  ) async throws {
     let harness = try makeHarness()
     defer { try? FileManager.default.removeItem(at: harness.root) }
     do { try await body(harness) } catch { await harness.service.stop(); throw error }

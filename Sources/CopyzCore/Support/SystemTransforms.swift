@@ -76,9 +76,11 @@ enum SystemTransform {
   }
 
   static func togglingCase(_ input: String) -> String {
-    String(input.map { character in
-      character.isLowercase ? Character(character.uppercased()) : Character(character.lowercased())
-    })
+    String(
+      input.map { character in
+        character.isLowercase
+          ? Character(character.uppercased()) : Character(character.lowercased())
+      })
   }
 }
 

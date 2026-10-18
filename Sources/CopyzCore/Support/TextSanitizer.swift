@@ -25,16 +25,16 @@ enum TextSanitizer {
 
   private static let decorations: Set<Unicode.Scalar> = {
     var set = Set<Unicode.Scalar>([
-      "\u{200D}", // ZERO WIDTH JOINER
-      "\u{FE0F}", // VARIATION SELECTOR-16 (emoji presentation)
-      "\u{FE0E}", // VARIATION SELECTOR-15 (text presentation)
-      "\u{20E3}", // COMBINING ENCLOSING KEYCAP
+      "\u{200D}",  // ZERO WIDTH JOINER
+      "\u{FE0F}",  // VARIATION SELECTOR-16 (emoji presentation)
+      "\u{FE0E}",  // VARIATION SELECTOR-15 (text presentation)
+      "\u{20E3}",  // COMBINING ENCLOSING KEYCAP
     ])
-    inserting(0xE0020...0xE007F, into: &set) // emoji flag tag characters
-    inserting(0x0300...0x036F, into: &set) // combining diacritics
-    inserting(0x1AB0...0x1AFF, into: &set) // combining marks, extended
-    inserting(0x20D0...0x20FF, into: &set) // combining marks for symbols
-    inserting(0xFE20...0xFE2F, into: &set) // combining half marks
+    inserting(0xE0020...0xE007F, into: &set)  // emoji flag tag characters
+    inserting(0x0300...0x036F, into: &set)  // combining diacritics
+    inserting(0x1AB0...0x1AFF, into: &set)  // combining marks, extended
+    inserting(0x20D0...0x20FF, into: &set)  // combining marks for symbols
+    inserting(0xFE20...0xFE2F, into: &set)  // combining half marks
     return set
   }()
 

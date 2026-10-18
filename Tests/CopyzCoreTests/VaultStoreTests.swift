@@ -72,7 +72,7 @@ struct VaultWriterTests {
     try await writer.prepare()
 
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47]))
     ])
     try await writer.write(item)
 
@@ -90,7 +90,7 @@ struct VaultWriterTests {
     try await writer.prepare()
 
     let item = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3, 4])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([1, 2, 3, 4]))
     ])
     try await writer.write(item)
     try await writer.write(item)

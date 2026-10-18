@@ -140,7 +140,8 @@ struct ClipPreviewView: View {
       return
     }
     if item.kind == .richText || item.kind == .html,
-       let attributed = ClipPreview.attributedText(for: item) {
+      let attributed = ClipPreview.attributedText(for: item)
+    {
       rendered = .attributed(attributed)
       return
     }

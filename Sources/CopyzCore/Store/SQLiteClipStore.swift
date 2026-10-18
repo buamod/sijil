@@ -62,62 +62,67 @@ public final class SQLiteClipStore: ClipStore {
   private static var migrator: DatabaseMigrator {
     var migrator = DatabaseMigrator()
     migrator.registerMigration("v1") { db in
-      try db.execute(sql: """
-        CREATE TABLE clip (
-          rowid_pk         INTEGER PRIMARY KEY AUTOINCREMENT,
-          id               TEXT    NOT NULL UNIQUE,
-          content_hash     TEXT    NOT NULL,
-          created_at       REAL    NOT NULL,
-          last_used_at     REAL    NOT NULL,
-          source_bundle_id TEXT,
-          source_app_name  TEXT,
-          pinned           INTEGER NOT NULL DEFAULT 0,
-          locked           INTEGER NOT NULL DEFAULT 0,
-          collection       TEXT,
-          use_count        INTEGER NOT NULL DEFAULT 1,
-          title            TEXT    NOT NULL DEFAULT '',
-          kind             TEXT    NOT NULL,
-          exported_at      REAL
-        )
-        """)
+      try db.execute(
+        sql: """
+          CREATE TABLE clip (
+            rowid_pk         INTEGER PRIMARY KEY AUTOINCREMENT,
+            id               TEXT    NOT NULL UNIQUE,
+            content_hash     TEXT    NOT NULL,
+            created_at       REAL    NOT NULL,
+            last_used_at     REAL    NOT NULL,
+            source_bundle_id TEXT,
+            source_app_name  TEXT,
+            pinned           INTEGER NOT NULL DEFAULT 0,
+            locked           INTEGER NOT NULL DEFAULT 0,
+            collection       TEXT,
+            use_count        INTEGER NOT NULL DEFAULT 1,
+            title            TEXT    NOT NULL DEFAULT '',
+            kind             TEXT    NOT NULL,
+            exported_at      REAL
+          )
+          """)
 
       // Tombstones outlive the rows they refer to: vault import is read-only,
       // so without this a deleted clip is re-added from the note that still
       // exists on every other synced machine.
-      try db.execute(sql: """
-        CREATE TABLE clip_tombstone (
-          id         TEXT PRIMARY KEY,
-          deleted_at REAL NOT NULL
-        )
-        """)
+      try db.execute(
+        sql: """
+          CREATE TABLE clip_tombstone (
+            id         TEXT PRIMARY KEY,
+            deleted_at REAL NOT NULL
+          )
+          """)
       try db.execute(sql: "CREATE INDEX clip_tombstone_deleted ON clip_tombstone(deleted_at)")
 
       // Content-addressed dedupe: the same clip copied twice is one row.
       try db.execute(sql: "CREATE UNIQUE INDEX clip_content_hash ON clip(content_hash)")
       try db.execute(sql: "CREATE INDEX clip_created ON clip(created_at DESC)")
-      try db.execute(sql: "CREATE INDEX clip_unexported ON clip(exported_at) WHERE exported_at IS NULL")
+      try db.execute(
+        sql: "CREATE INDEX clip_unexported ON clip(exported_at) WHERE exported_at IS NULL")
       try db.execute(sql: "CREATE INDEX clip_locked ON clip(locked) WHERE locked = 1")
 
-      try db.execute(sql: """
-        CREATE TABLE clip_content (
-          id      INTEGER PRIMARY KEY AUTOINCREMENT,
-          clip_id TEXT NOT NULL REFERENCES clip(id) ON DELETE CASCADE,
-          type    TEXT NOT NULL,
-          value   BLOB NOT NULL
-        )
-        """)
+      try db.execute(
+        sql: """
+          CREATE TABLE clip_content (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            clip_id TEXT NOT NULL REFERENCES clip(id) ON DELETE CASCADE,
+            type    TEXT NOT NULL,
+            value   BLOB NOT NULL
+          )
+          """)
       try db.execute(sql: "CREATE INDEX clip_content_clip ON clip_content(clip_id)")
 
       // Standalone FTS5 table rather than external-content: we control writes
       // explicitly, which keeps deletes simple.
-      try db.execute(sql: """
-        CREATE VIRTUAL TABLE clip_fts USING fts5(
-          title,
-          body,
-          clip_rowid UNINDEXED,
-          tokenize = 'trigram'
-        )
-        """)
+      try db.execute(
+        sql: """
+          CREATE VIRTUAL TABLE clip_fts USING fts5(
+            title,
+            body,
+            clip_rowid UNINDEXED,
+            tokenize = 'trigram'
+          )
+          """)
     }
     return migrator
   }
@@ -251,7 +256,8 @@ public final class SQLiteClipStore: ClipStore {
         ]
       )
 
-      let row = try ClipRow
+      let row =
+        try ClipRow
         .filter(Column("content_hash") == hash)
         .fetchOne(db)
       guard let row else {
@@ -292,9 +298,10 @@ public final class SQLiteClipStore: ClipStore {
     contents: [ClipContent],
     in db: Database
   ) -> Bool {
-    let stored = (try? ContentRow
-      .filter(Column("clip_id") == clipID)
-      .fetchAll(db)) ?? []
+    let stored =
+      (try? ContentRow
+        .filter(Column("clip_id") == clipID)
+        .fetchAll(db)) ?? []
     guard stored.count == contents.count, !stored.isEmpty else { return false }
     let storedSet = Set(stored.map { "\($0.type):\(Digest.hex($0.value))" })
     let incomingSet = Set(contents.map { "\($0.type):\(Digest.hex($0.value))" })
@@ -321,7 +328,8 @@ public final class SQLiteClipStore: ClipStore {
 
   public func recent(limit: Int, includeUnpinnedOnly: Bool = false) throws -> [ClipItem] {
     try pool.read { db in
-      var request = ClipRow
+      var request =
+        ClipRow
         .order(Column("locked").desc, Column("pinned").desc, Column("created_at").desc)
         .limit(limit)
       if includeUnpinnedOnly {
@@ -338,7 +346,8 @@ public final class SQLiteClipStore: ClipStore {
     return try pool.read { db in
       // Trigram tokenization cannot match anything shorter than three
       // characters.
-      let terms = trimmed
+      let terms =
+        trimmed
         .components(separatedBy: .whitespacesAndNewlines)
         .filter { $0.count >= 3 }
         // Quote so FTS5 reads user input as literals; an unbalanced quote would
@@ -549,7 +558,8 @@ public final class SQLiteClipStore: ClipStore {
 
   public func pendingExport(limit: Int) throws -> [ClipItem] {
     try pool.read { db in
-      let rows = try ClipRow
+      let rows =
+        try ClipRow
         .filter(Column("exported_at") == nil)
         .order(Column("created_at").asc)
         .limit(limit)
@@ -585,14 +595,15 @@ public final class SQLiteClipStore: ClipStore {
       if policy.fullFidelityWindow.isFinite {
         let cutoff = now.addingTimeInterval(-policy.fullFidelityWindow).timeIntervalSince1970
         let placeholders = Array(repeating: "?", count: binaryKinds.count).joined(separator: ",")
-        victims.formUnion(try String.fetchAll(
-          db,
-          sql: """
-            SELECT id FROM clip
-            WHERE created_at < ? AND kind IN (\(placeholders)) \(guardClause)
-            """,
-          arguments: StatementArguments([cutoff] + binaryKinds)
-        ))
+        victims.formUnion(
+          try String.fetchAll(
+            db,
+            sql: """
+              SELECT id FROM clip
+              WHERE created_at < ? AND kind IN (\(placeholders)) \(guardClause)
+              """,
+            arguments: StatementArguments([cutoff] + binaryKinds)
+          ))
       }
 
       // Textual rows go last and only when a tail window is configured.
@@ -601,30 +612,32 @@ public final class SQLiteClipStore: ClipStore {
         let placeholders = Array(repeating: "?", count: binaryKinds.count).joined(separator: ",")
         var arguments: [DatabaseValueConvertible?] = [cutoff]
         arguments += binaryKinds
-        victims.formUnion(try String.fetchAll(
-          db,
-          sql: """
-            SELECT id FROM clip
-            WHERE created_at < ? AND kind NOT IN (\(placeholders)) \(guardClause)
-            """,
-          arguments: StatementArguments(arguments)
-        ))
+        victims.formUnion(
+          try String.fetchAll(
+            db,
+            sql: """
+              SELECT id FROM clip
+              WHERE created_at < ? AND kind NOT IN (\(placeholders)) \(guardClause)
+              """,
+            arguments: StatementArguments(arguments)
+          ))
       }
 
       // Hard ceiling, applied last.
       if let maximum = policy.maximumItems, maximum > 0 {
-        victims.formUnion(try String.fetchAll(
-          db,
-          sql: """
-            SELECT id FROM clip
-            WHERE rowid_pk NOT IN (
-              SELECT rowid_pk FROM clip
-              ORDER BY locked DESC, pinned DESC, created_at DESC LIMIT ?
-            )
-            \(guardClause)
-            """,
-          arguments: [maximum]
-        ))
+        victims.formUnion(
+          try String.fetchAll(
+            db,
+            sql: """
+              SELECT id FROM clip
+              WHERE rowid_pk NOT IN (
+                SELECT rowid_pk FROM clip
+                ORDER BY locked DESC, pinned DESC, created_at DESC LIMIT ?
+              )
+              \(guardClause)
+              """,
+            arguments: [maximum]
+          ))
       }
 
       for id in victims { try self.deleteRow(id, in: db) }
@@ -697,10 +710,11 @@ public final class SQLiteClipStore: ClipStore {
     try pool.read { db in
       var total: Int64 = 0
       for table in ["clip", "clip_content", "clip_fts"] {
-        total += try Int64.fetchOne(
-          db,
-          sql: "SELECT COALESCE(SUM(LENGTH(CAST(\(table) AS BLOB))), 0) FROM \(table)"
-        ) ?? 0
+        total +=
+          try Int64.fetchOne(
+            db,
+            sql: "SELECT COALESCE(SUM(LENGTH(CAST(\(table) AS BLOB))), 0) FROM \(table)"
+          ) ?? 0
       }
       return total
     }

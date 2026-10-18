@@ -27,7 +27,7 @@ struct FailureInjectionTests {
 
   private func textItem(_ text: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8))
     ])
   }
 
@@ -111,11 +111,12 @@ struct FailureInjectionTests {
     try store.tombstone(clip.id)
 
     // A vault import cannot resurrect it.
-    _ = try store.record(ClipItem(
-      id: clip.id,
-      contents: clip.contents,
-      isFromLocalCapture: false
-    ))
+    _ = try store.record(
+      ClipItem(
+        id: clip.id,
+        contents: clip.contents,
+        isFromLocalCapture: false
+      ))
 
     #expect(try store.count() == 0)
     #expect(try store.pendingExport(limit: 10).isEmpty)
@@ -127,7 +128,7 @@ struct FailureInjectionTests {
   func hashDeterminismUnderHostileInput() throws {
     // Empty value.
     let empty = ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data()),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data())
     ])
     // Same type twice.
     let duplicated = ClipItem(contents: [
@@ -136,7 +137,9 @@ struct FailureInjectionTests {
     ])
     // Large payload.
     let large = ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(String(repeating: "x", count: 200_000).utf8)),
+      ClipContent(
+        type: PasteboardType.string.rawValue,
+        value: Data(String(repeating: "x", count: 200_000).utf8))
     ])
 
     for item in [empty, duplicated, large] {
@@ -337,8 +340,10 @@ struct FailureInjectionTests {
       .write(to: clips.appending(path: "garbage.md"))
     try Data("---\nid: not-a-uuid\n---\nbody".utf8)
       .write(to: clips.appending(path: "badid.md"))
-    try Data("---\nid: 0199f2c1-4b2a-7c3d-9e1f-5a6b7c8d9e0f\nkind: nonsense\nsha256: abc\n---\nx".utf8)
-      .write(to: clips.appending(path: "badkind.md"))
+    try Data(
+      "---\nid: 0199f2c1-4b2a-7c3d-9e1f-5a6b7c8d9e0f\nkind: nonsense\nsha256: abc\n---\nx".utf8
+    )
+    .write(to: clips.appending(path: "badkind.md"))
     try Data([0x00, 0xFF, 0xFE, 0x42]).write(to: clips.appending(path: "binary.md"))
 
     let store = try SQLiteClipStore(inMemory: true)
@@ -358,7 +363,8 @@ struct FailureInjectionTests {
 
     // A note from a much newer copyz. Importing it could misinterpret fields, so
     // it must be skipped rather than partially understood.
-    try Data("""
+    try Data(
+      """
       ---
       id: 0199f2c1-4b2a-7c3d-9e1f-5a6b7c8d9e0f
       ts: 2026-10-18T14:32:10Z
@@ -367,7 +373,8 @@ struct FailureInjectionTests {
       schema: 99
       ---
       future content
-      """.utf8).write(to: clips.appending(path: "future.md"))
+      """.utf8
+    ).write(to: clips.appending(path: "future.md"))
 
     let store = try SQLiteClipStore(inMemory: true)
     let vault = VaultStore(store: store, writer: VaultWriter(rootURL: root))

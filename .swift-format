@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "lineLength": 100,
+  "indentation": {
+    "spaces": 2
+  },
+  "maximumBlankLines": 1,
+  "lineBreakBeforeEachArgument": false,
+  "prioritizeKeepingFunctionOutputTogether": true,
+  "indentConditionalCompilationBlocks": false,
+  "lineBreakBeforeControlFlowKeywords": false,
+  "rules": {
+    "AmbiguousTrailingClosureOverload": false,
+    "OrderedImports": true,
+    "UseLetInEveryBoundCaseVariable": false,
+    "UseShorthandTypeNames": false,
+    "UseSingleLinePropertyGetter": false,
+    "UseWhereClausesInForLoops": false
+  }
+}

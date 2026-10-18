@@ -56,7 +56,7 @@ public actor VaultWriter {
 
     var isDirectory: ObjCBool = false
     guard fileManager.fileExists(atPath: rootURL.path, isDirectory: &isDirectory),
-          isDirectory.boolValue
+      isDirectory.boolValue
     else {
       throw Failure.rootMissing(rootURL)
     }
@@ -98,7 +98,8 @@ public actor VaultWriter {
     // Binary payload first: a note referencing a missing asset is worse than a
     // late note.
     if let assetName = VaultNote.assetName(for: item),
-       let data = VaultNote.assetData(for: item) {
+      let data = VaultNote.assetData(for: item)
+    {
       let assetURL = rootURL.appending(path: "assets/\(assetName)")
       if !fileManager.fileExists(atPath: assetURL.path) {
         do {
@@ -135,7 +136,9 @@ public actor VaultWriter {
         try write(item)
         written.append(item.id)
       } catch {
-        log.error("skipping \(item.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        log.error(
+          "skipping \(item.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+        )
       }
     }
     return written
@@ -163,8 +166,8 @@ public actor VaultWriter {
     for case let fileURL as URL in enumerator {
       guard fileURL.pathExtension == "md" else { continue }
       guard let data = try? Data(contentsOf: fileURL),
-            let text = String(data: data, encoding: .utf8),
-            let decoded = VaultNote.decode(text)
+        let text = String(data: data, encoding: .utf8),
+        let decoded = VaultNote.decode(text)
       else { continue }
       results.append(decoded)
       if results.count >= limit { break }

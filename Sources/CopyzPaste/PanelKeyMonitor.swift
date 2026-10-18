@@ -78,10 +78,10 @@ public final class PanelKeyMonitor {
     let shift = flags.contains(.shift)
 
     switch keyCode {
-    case 125: return .moveSelection(1) // ↓
-    case 126: return .moveSelection(-1) // ↑
-    case 53: return .dismiss // esc
-    case 51, 115: return .deleteSelection // delete, forward delete
+    case 125: return .moveSelection(1)  // ↓
+    case 126: return .moveSelection(-1)  // ↑
+    case 53: return .dismiss  // esc
+    case 51, 115: return .deleteSelection  // delete, forward delete
     case 36, 76, 71, 48:
       // Return, ⌘M, ⌘E, and tab all commit the selection.
       return command ? .dismiss : .copySelection

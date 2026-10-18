@@ -164,7 +164,7 @@ public struct SecretDetector: Sendable {
       guard parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isBase64URLCharacter) })
       else { continue }
       guard let header = base64URLDecode(String(parts[0])),
-            header.contains("\"alg\"") || header.contains("\"typ\"")
+        header.contains("\"alg\"") || header.contains("\"typ\"")
       else { continue }
       return true
     }
@@ -230,7 +230,9 @@ public struct SecretDetector: Sendable {
       if text.range(
         of: pattern,
         options: [.regularExpression, .caseInsensitive]
-      ) != nil { return true }
+      ) != nil {
+        return true
+      }
     }
     return false
   }
@@ -295,7 +297,8 @@ public struct SecretDetector: Sendable {
   /// keyword, or a keyword with a short or obviously non-secret value, is
   /// deliberately not a match — config files and docs mention these constantly.
   private static func containsSecretAssignment(_ text: String) -> Bool {
-    let pattern = "(?i)\\b([a-z0-9_.-]*(?:\(secretKeywordsPattern()))[a-z0-9_.-]*)"
+    let pattern =
+      "(?i)\\b([a-z0-9_.-]*(?:\(secretKeywordsPattern()))[a-z0-9_.-]*)"
       + "\\s*(?:[:=]|=>)\\s*[\"']?([^\"'\\s,;]{8,})[\"']?"
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
     let range = NSRange(text.startIndex..., in: text)
@@ -365,8 +368,10 @@ public struct SecretDetector: Sendable {
   private static func base64URLDecode(_ input: String) -> String? {
     var standard = input
     while standard.hasSuffix("=") { standard.removeLast() }
-    guard let data = Data(base64Encoded: standard.replacingOccurrences(of: "-", with: "+")
-      .replacingOccurrences(of: "_", with: "/")),
+    guard
+      let data = Data(
+        base64Encoded: standard.replacingOccurrences(of: "-", with: "+")
+          .replacingOccurrences(of: "_", with: "/")),
       !data.isEmpty
     else { return nil }
     return String(data: data, encoding: .utf8)

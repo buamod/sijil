@@ -28,7 +28,7 @@ struct PasteEngineTests {
 
   private func textItem(_ text: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(text.utf8))
     ])
   }
 
@@ -220,7 +220,7 @@ struct PasteEngineTests {
   func imageKeepsBinaryType() {
     let board = makePasteboard()
     let image = ClipItem(contents: [
-      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47])),
+      ClipContent(type: PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4E, 0x47]))
     ])
     #expect(PasteboardWriter.write(image, to: board, plainTextOnly: false))
     let types = Set(board.pasteboardItems?.first?.types.map(\.rawValue) ?? [])

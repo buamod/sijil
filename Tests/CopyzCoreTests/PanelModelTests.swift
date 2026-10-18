@@ -12,7 +12,7 @@ import Testing
 struct PanelModelTests {
   private func item(_ name: String) -> ClipItem {
     ClipItem(contents: [
-      ClipContent(type: PasteboardType.string.rawValue, value: Data(name.utf8)),
+      ClipContent(type: PasteboardType.string.rawValue, value: Data(name.utf8))
     ])
   }
 
