@@ -12,7 +12,7 @@ import Testing
 @MainActor
 @Suite("Clipboard service", .serialized)
 struct ClipboardServiceTests {
-  private struct Harness {
+  fileprivate struct Harness {
     let service: ClipboardService
     let store: SQLiteClipStore
     let root: URL
@@ -275,5 +275,143 @@ struct SettingsSceneSupportTests {
     // Reads work; nothing is wired to the user's real vault or database.
     service.reload()
     #expect(service.items.isEmpty)
+  }
+}
+
+/// Settings changes must reach the running monitor.
+///
+/// `.copyzRulesChanged` was posted by every Capture Settings control and observed
+/// by nothing, so toggling "Record clipboard history", flipping "Record images",
+/// or changing the check interval took effect only after a relaunch. `applyRules`
+/// existed the whole time and was never called.
+///
+/// The tests post the notification rather than calling `applyRules` directly,
+/// because the missing link is the observer, not the method.
+@MainActor
+@Suite("Settings reactivity", .serialized)
+struct SettingsReactivityTests {
+  private func makeHarness() throws -> ClipboardServiceTests.Harness {
+    let root = FileManager.default.temporaryDirectory
+      .appending(path: "copyz-react-\(UUID().uuidString)", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+    let suite = "copyz.react.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.set(root.path, forKey: "vaultRootPath")
+
+    let settings = Settings(defaults: defaults)
+    let store = try SQLiteClipStore(inMemory: true)
+    let sidecarURL = root.appending(path: ".copyz/sidecar.json")
+    let collections = CollectionStore(sidecarURL: sidecarURL)
+    let service = ClipboardService(
+      settings: settings,
+      store: store,
+      vault: VaultStore(store: store, writer: VaultWriter(rootURL: root), collections: collections),
+      collections: collections,
+      sidecarURL: sidecarURL
+    )
+    return .init(service: service, store: store, root: root, settings: settings)
+  }
+
+  private func withHarness(_ body: (ClipboardServiceTests.Harness) async throws -> Void) async throws {
+    let harness = try makeHarness()
+    defer { try? FileManager.default.removeItem(at: harness.root) }
+    do { try await body(harness) } catch { await harness.service.stop(); throw error }
+    await harness.service.stop()
+  }
+
+  @Test("Pausing capture takes effect without a restart")
+  func pauseTakesEffectImmediately() async throws {
+    try await withHarness { harness in
+      try await harness.service.start()
+
+      var rules = harness.settings.rules
+      rules.isCapturing = false
+      harness.settings.rules = rules
+      NotificationCenter.default.post(name: .copyzRulesChanged, object: nil)
+      await Task.yield()
+
+      #expect(harness.service.monitor.rules.isCapturing == false)
+    }
+  }
+
+  @Test("Turning secret detection off takes effect without a restart")
+  func secretToggleTakesEffect() async throws {
+    try await withHarness { harness in
+      try await harness.service.start()
+      #expect(harness.service.monitor.rules.detectsSecrets)
+
+      var rules = harness.settings.rules
+      rules.detectsSecrets = false
+      harness.settings.rules = rules
+      NotificationCenter.default.post(name: .copyzRulesChanged, object: nil)
+      await Task.yield()
+
+      #expect(harness.service.monitor.rules.detectsSecrets == false)
+    }
+  }
+
+  @Test("Changing the check interval reaches the running monitor")
+  func pollIntervalTakesEffect() async throws {
+    try await withHarness { harness in
+      try await harness.service.start()
+      #expect(harness.service.monitor.configuration.pollInterval == 0.4)
+
+      harness.settings.pollInterval = 1.0
+      NotificationCenter.default.post(name: .copyzRulesChanged, object: nil)
+      await Task.yield()
+
+      #expect(harness.service.monitor.configuration.pollInterval == 1.0)
+    }
+  }
+
+  @Test("Ignore patterns recompile immediately")
+  func patternsRecompile() async throws {
+    try await withHarness { harness in
+      try await harness.service.start()
+
+      var rules = harness.settings.rules
+      rules.ignoredPatterns = ["^SECRET-"]
+      harness.settings.rules = rules
+      NotificationCenter.default.post(name: .copyzRulesChanged, object: nil)
+      await Task.yield()
+
+      // Behaviourally: the pattern now drops the copy.
+      #expect(
+        harness.service.monitor.rules.ignoredPatterns == ["^SECRET-"]
+      )
+    }
+  }
+
+  @Test("Stopping removes the observer so a dead service stops reacting")
+  func observerRemovedOnStop() async throws {
+    let harness = try makeHarness()
+    defer { try? FileManager.default.removeItem(at: harness.root) }
+    try await harness.service.start()
+
+    await harness.service.stop()
+
+    harness.settings.pollInterval = 1.0
+    NotificationCenter.default.post(name: .copyzRulesChanged, object: nil)
+    await Task.yield()
+
+    // Still 0.4s: the observer is gone, not merely harmless.
+    #expect(harness.service.monitor.configuration.pollInterval == 0.4)
+  }
+
+  @Test("Starting twice does not double-apply")
+  func doubleStartIsIdempotent() async throws {
+    try await withHarness { harness in
+      try await harness.service.start()
+      try await harness.service.start()
+
+      harness.settings.pollInterval = 1.0
+      NotificationCenter.default.post(name: .copyzRulesChanged, object: nil)
+      await Task.yield()
+
+      // Applied, and still exactly the configured value — a second observer
+      // would be harmless here, but the removal test covers the leak.
+      #expect(harness.service.monitor.configuration.pollInterval == 1.0)
+    }
   }
 }

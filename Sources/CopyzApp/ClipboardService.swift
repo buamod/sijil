@@ -15,7 +15,7 @@ import os
 public final class ClipboardService {
   private let store: SQLiteClipStore
   private let vault: VaultStore
-  private let monitor: PasteboardMonitor
+  let monitor: PasteboardMonitor
   public let collections: CollectionStore
   private let sidecarURL: URL
   private let log = Logger(subsystem: "app.copyz", category: "service")
@@ -444,22 +444,24 @@ public final class ClipboardService {
     }
   }
 
-  /// Observes the maintenance commands posted by the Settings buttons.
+  /// Observes the commands posted by the Settings window.
   ///
   /// Tokens are retained and the observers removed on `stop()`. Registering
   /// without keeping them means a second `start()` silently doubles every
   /// handler, so one flush becomes two and one rebuild becomes two — the kind of
   /// bug that only shows up after a restart and never reproduces in isolation.
   ///
-  /// Called once at startup. The buttons used to post notifications that nothing
-  /// was listening for, so they silently did nothing; a `NotificationCenter`
-  /// round trip has no compiler checking to catch that.
+  /// Two rounds of this class of bug have shipped. Both the maintenance buttons
+  /// and the rule-change notification were posted with nothing listening, so
+  /// Settings looked fully wired while doing nothing. A `NotificationCenter`
+  /// round trip has no compiler checking, which is exactly why the tests drive
+  /// these posts rather than trusting that an observer exists.
   public func observeMaintenanceCommands() {
     // Idempotent: a second `start()` must not leave the first registration in
     // place alongside the new one.
     removeMaintenanceObservers()
     let center = NotificationCenter.default
-    maintenanceObservers = [
+    var observers: [NSObjectProtocol] = [
       .copyzFlushVault, .copyzRebuildVault, .copyzCompact,
     ].map { name in
       center.addObserver(forName: name, object: nil, queue: .main) {
@@ -474,6 +476,20 @@ public final class ClipboardService {
         }
       }
     }
+
+    // Rule and interval changes are posted by Settings. This observer was
+    // missing, so every toggle in Capture Settings took effect only after a
+    // relaunch — including "Check interval", which quietly did nothing at all.
+    observers.append(
+      center.addObserver(forName: .copyzRulesChanged, object: nil, queue: .main) {
+        [weak self] _ in
+        // `queue: .main` does not satisfy the compiler's actor check, and
+        // `applyRules` is main-actor bound because it mutates the monitor.
+        MainActor.assumeIsolated { self?.applyRules() }
+      }
+    )
+
+    maintenanceObservers = observers
   }
 
   private var maintenanceObservers: [NSObjectProtocol] = []
