@@ -242,3 +242,38 @@ struct ClipboardServiceTests {
     }
   }
 }
+/// The Settings window has to open even when the real service could not be
+/// built. It used to have no route at all, because the `Settings` scene was
+/// never registered with the app.
+@MainActor
+@Suite("Settings scene support")
+struct SettingsSceneSupportTests {
+  private func isolatedSettings() -> Settings {
+    let suite = "copyz.settings.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    return Settings(defaults: defaults)
+  }
+
+  @Test("A degraded service can be constructed without throwing")
+  func degradedServiceIsConstructible() {
+    // The default initialiser throws when the database cannot be opened. The
+    // settings scene needs *something* for its environment, and a window that
+    // crashes on open is worse than one that reports the problem.
+    let service = ClipboardService.unavailable(settings: isolatedSettings())
+    #expect(service.items.isEmpty)
+  }
+
+  @Test("The degraded service discards writes instead of touching real history")
+  func degradedServiceIsIsolated() throws {
+    let suite = "copyz.degraded.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.set("/nonexistent-copyz-test/vault", forKey: "vaultRootPath")
+
+    let service = ClipboardService.unavailable(settings: Settings(defaults: defaults))
+    #expect(service.items.isEmpty)
+    // Reads work; nothing is wired to the user's real vault or database.
+    service.reload()
+    #expect(service.items.isEmpty)
+  }
+}

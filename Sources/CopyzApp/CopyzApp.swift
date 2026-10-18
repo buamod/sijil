@@ -14,6 +14,13 @@ struct CopyzApp: App {
     MenuBarExtra("copyz", systemImage: "doc.on.clipboard") {
       MenuBarContent(delegate: delegate)
     }
+
+    // This scene has to exist for `showSettingsWindow:` to have a receiver.
+    // Without it the menu bar's "Settings…" sends an action nobody implements and
+    // silently does nothing — which is exactly what it was doing.
+    SwiftUI.Settings {
+      SettingsScene(delegate: delegate)
+    }
   }
 }
 
@@ -53,13 +60,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var itemCount: Int { service?.items.count ?? 0 }
 
   func togglePanel() { togglePanelAction() }
+  /// The running service, or a placeholder if construction failed.
+  ///
+  /// Exposed so the `Settings` scene can put it in the environment. `PrivacySettings`
+  /// reads `lastRejection` from it, and a Settings scene is outside the main view
+  /// tree, so nothing else would supply one.
+  var clipboardService: ClipboardService {
+    service ?? ClipboardService.unavailable(settings: settings)
+  }
+
   func skipNextCopy() { service?.skipNextCopy() }
   func flushVault() { Task { await service?.flushVault() } }
   func rebuildVault() { Task { await service?.rebuildFromVault() } }
 
   func openSettings() {
     NSApp.activate()
-    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    // An `.accessory` app has no menu bar of its own, so ⌘, has no target either.
+    // The explicit action send is the only route, and its return value is the
+    // only signal that the `Settings` scene is actually present.
+    let sent = NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    if !sent {
+      presentError(SettingsUnavailableError())
+    }
   }
 
   static let defaultHotKey = GlobalHotKey.Binding(
@@ -83,6 +105,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     installHotKey()
     checkPasteboardAccess()
+
+    // `copyz --settings` opens preferences directly. A menu-bar app has no
+    // window to fall back on, so a broken or hidden menu bar item otherwise
+    // leaves no route to the settings at all.
+    if CommandLine.arguments.contains("--settings") {
+      DispatchQueue.main.async { [weak self] in self?.openSettings() }
+    }
   }
 
   func applicationWillTerminate(_ notification: Notification) {
@@ -475,6 +504,34 @@ private struct PasteboardAccessApproval: LocalizedError {
   }
 }
 
+/// Shown when `showSettingsWindow:` has no receiver.
+///
+/// That means the `Settings` scene is missing from the `App` body, which is
+/// exactly the bug that shipped once. Reporting it beats a menu bar item that
+/// looks clickable and does nothing.
+private struct SettingsUnavailableError: LocalizedError {
+  var errorDescription: String? {
+    "The settings window could not be opened. This is a bug in copyz: the "
+      + "Settings scene is not registered with the app."
+  }
+}
+
+/// Supplies the environment the settings panes read from.
+///
+/// A `Settings` scene is not part of the main view tree, so the objects the
+/// panes expect in the environment have to be injected here. Without this the
+/// panes render with no `Settings` in scope and crash the moment the window
+/// opens — the menu bar item looked fine right up until it was clicked.
+struct SettingsScene: View {
+  @Bindable var delegate: AppDelegate
+
+  var body: some View {
+    SettingsView()
+      .environment(delegate.settings)
+      .environment(delegate.clipboardService)
+  }
+}
+
 struct SettingsView: View {
   @Environment(Settings.self) private var settings
 
@@ -487,7 +544,7 @@ struct SettingsView: View {
       VaultSettings()
         .tabItem { Label("Vault", systemImage: "folder") }
     }
-    .frame(width: 520, height: 380)
+    .frame(width: 520, height: 420)
   }
 }
 

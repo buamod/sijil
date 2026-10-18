@@ -59,6 +59,40 @@ public final class ClipboardService {
     }
   }
 
+  /// A service backed by throwaway storage, for when the real one could not be
+  /// built.
+  ///
+  /// Exists because the Settings scene must have *something* in its environment.
+  /// If the database cannot be opened, `ClipboardService(settings:)` throws, and
+  /// a settings window that crashed on open would be worse than one that opens
+  /// and reports the problem.
+  ///
+  /// Writes go to a scratch directory, so anything done here is discarded rather
+  /// than half-applied to the user's real history.
+  static func unavailable(settings: Settings) -> ClipboardService {
+    let scratch = FileManager.default.temporaryDirectory
+      .appending(path: "copyz-degraded-\(UUID().uuidString)", directoryHint: .isDirectory)
+    let store = (try? SQLiteClipStore(inMemory: true))
+      ?? (try? SQLiteClipStore(path: scratch.appending(path: "scratch.sqlite").path))
+    // `SQLiteClipStore.inMemory` cannot fail in practice; the fallback exists so
+    // this function has no throwing path at all.
+    guard let store else {
+      preconditionFailure("copyz could not open any store, degraded or not")
+    }
+
+    let sidecarURL = scratch.appending(path: "sidecar.json")
+    return ClipboardService(
+      settings: settings,
+      store: store,
+      vault: VaultStore(
+        store: store,
+        writer: VaultWriter(rootURL: scratch.appending(path: "Vault", directoryHint: .isDirectory))
+      ),
+      collections: CollectionStore(sidecarURL: nil),
+      sidecarURL: sidecarURL
+    )
+  }
+
   /// Test seam: every path supplied explicitly.
   ///
   /// The default initialiser reaches into Application Support, which makes the

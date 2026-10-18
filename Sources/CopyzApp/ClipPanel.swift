@@ -94,17 +94,6 @@ struct ClipListView: View {
       }
     }
     .listStyle(.sidebar)
-    .safeAreaInset(edge: .bottom, spacing: 0) {
-      Button {
-        sidebarVisible = false
-      } label: {
-        Label("Hide Collections", systemImage: "sidebar.left")
-          .font(.caption)
-      }
-      .buttonStyle(.plain)
-      .padding(6)
-      .frame(maxWidth: .infinity, alignment: .leading)
-    }
   }
 
   @State private var sidebarVisible = true
@@ -118,6 +107,16 @@ struct ClipListView: View {
 
   private var searchField: some View {
     HStack(spacing: 6) {
+      // In the header rather than at the foot of the sidebar: a control that
+      // hides the sidebar must stay reachable once the sidebar is gone.
+      Button {
+        sidebarVisible.toggle()
+      } label: {
+        Image(systemName: "sidebar.leading")
+      }
+      .buttonStyle(.plain)
+      .help(sidebarVisible ? "Hide Collections" : "Show Collections")
+
       Image(systemName: "magnifyingglass")
         .foregroundStyle(.secondary)
       TextField("Search clipboard", text: $model.query)
@@ -203,7 +202,7 @@ struct ClipListView: View {
 
   private var footer: some View {
     HStack(spacing: 12) {
-      Text("\(model.visibleItems.count) of \(model.items.count)")
+      Text(footerSummary)
         .font(.caption)
         .foregroundStyle(.secondary)
       if !model.visibleItems.isEmpty {
@@ -243,6 +242,29 @@ struct ClipListView: View {
   }
 
   @State private var confirmingClear = false
+
+  /// "42 of 120", or the active bucket's name when one is selected.
+  ///
+  /// Naming the filter matters when the sidebar is hidden: a collection filter
+  /// with no visible sidebar just looks like a short list.
+  private var footerSummary: String {
+    let counts = "\(model.visibleItems.count) of \(model.items.count)"
+    guard !sidebarVisible else { return counts }
+
+    switch model.scope {
+    case .all: return counts
+    case .pinned: return "Pinned · \(counts)"
+    case .locked: return "Locked · \(counts)"
+    case .collection:
+      let name = model.collections.first { $0.id == scopeID }?.name ?? "Collection"
+      return "\(name) · \(counts)"
+    }
+  }
+
+  private var scopeID: UUID {
+    if case .collection(let id) = model.scope { return id }
+    return UUID()
+  }
 
   /// Explains why the most recent copy was not recorded, so a skipped clip is
   /// answerable rather than mysterious.
