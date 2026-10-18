@@ -60,6 +60,17 @@ public enum PasteboardExtractor {
         return (ClipItem(contents: []), .patternMatched)
       }
 
+      // The secret check lives here rather than in the call above because the
+      // rules pass runs before any payload has been read, so it has no text to
+      // inspect. Anything dropped here is dropped whole: a multi-item
+      // pasteboard with one secret in it is not partially safe to keep.
+      if rules.detectsSecrets,
+         let text = pasteboardItem.string(forType: .string),
+         !text.isEmpty,
+         let kind = SecretDetector().detect(in: text) {
+        return (ClipItem(contents: []), .secretDetected(kind))
+      }
+
       types = types.filter { PasteboardType.isPersistable($0) }
 
       // Drop Word bookmark plumbing when it is a superset of the real payload.

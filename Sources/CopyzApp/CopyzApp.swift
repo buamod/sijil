@@ -189,10 +189,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func showPanel() {
     guard let service else { return }
+    // Refresh the sidebar on every show: collections can be renamed, created, or
+    // deleted from the context menu while the panel is closed, and a stale list
+    // would offer scopes that no longer exist.
+    panelModel.setCollections(TaskCache.shared.collections)
     panelModel.replaceItems(service.items)
     panelModel.query = ""
     if panelModel.selection == nil {
-      panelModel.selection = service.items.first?.id
+      panelModel.selection = panelModel.visibleItems.first?.id
     }
 
     if panel == nil {
@@ -212,6 +216,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     keyMonitor.stop()
     panel?.orderOut(nil)
     panelModel.selection = nil
+  }
+
+  // MARK: - Collections
+
+  /// Prompts for a collection name and creates it.
+  ///
+  /// A plain text field rather than a sheet: collection names are short, and a
+  /// sheet on a non-activating panel is awkward to drive.
+  private func promptForCollectionName() {
+    guard let service else { return }
+    guard let name = Self.askForText(
+      title: "New Collection",
+      message: "Name",
+      initial: ""
+    ) else { return }
+
+    Task { @MainActor in
+      _ = await service.makeCollection(name: name)
+      panelModel.setCollections(TaskCache.shared.collections)
+      panelModel.replaceItems(service.items)
+    }
+  }
+
+  private func promptForRename(_ id: UUID) {
+    guard let service else { return }
+    let current = TaskCache.shared.collections.first { $0.id == id }?.name ?? ""
+    guard let name = Self.askForText(
+      title: "Rename Collection",
+      message: "Name",
+      initial: current
+    ) else { return }
+
+    Task { @MainActor in
+      await service.renameCollection(id, to: name)
+      panelModel.setCollections(TaskCache.shared.collections)
+    }
+  }
+
+  /// Single-line text prompt. Returns nil when cancelled.
+  private static func askForText(
+    title: String,
+    message: String,
+    initial: String
+  ) -> String? {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    let field = NSTextField(string: initial)
+    field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+    alert.accessoryView = field
+    alert.addButton(withTitle: "OK")
+    alert.addButton(withTitle: "Cancel")
+
+    guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+    let trimmed = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 
   // MARK: - Auxiliary panels
@@ -323,6 +383,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let self, let service = self.service else { return }
         Task { @MainActor in
           await service.clearAll(includingPinned: true)
+          self.panelModel.replaceItems(service.items)
+        }
+      },
+      onCreateCollection: { [weak self] in self?.promptForCollectionName() },
+      onRenameCollection: { [weak self] id in self?.promptForRename(id) },
+      onDeleteCollection: { [weak self] id in
+        guard let self, let service = self.service else { return }
+        Task { @MainActor in
+          await service.deleteCollection(id)
+          self.panelModel.setCollections(TaskCache.shared.collections)
           self.panelModel.replaceItems(service.items)
         }
       },

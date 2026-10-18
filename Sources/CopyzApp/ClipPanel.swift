@@ -31,19 +31,89 @@ struct ClipListView: View {
   let onToggleLock: (ClipItem) -> Void
   /// Deletes everything except locked items.
   let onClearHistory: () -> Void
+  let onCreateCollection: () -> Void
+  let onRenameCollection: (UUID) -> Void
+  let onDeleteCollection: (UUID) -> Void
   /// Why the last copy was skipped, if it was.
   var rejection: CaptureRules.Rejection?
 
   var body: some View {
-    VStack(spacing: 0) {
-      searchField
+    HStack(spacing: 0) {
+      sidebar
       Divider()
-      list
-      Divider()
-      footer
+      VStack(spacing: 0) {
+        searchField
+        Divider()
+        list
+        Divider()
+        footer
+      }
     }
-    .frame(width: 420, height: 460)
+    .frame(width: sidebarVisible ? 540 : 420, height: 460)
     .background { GlassBackground() }
+  }
+
+  /// Which buckets exist, plus a New Collection entry.
+  private var sidebar: some View {
+    List(selection: scopeBinding) {
+      Section {
+        Label("All", systemImage: "tray.full")
+          .tag(PanelModel.Scope.all)
+      }
+
+      if !model.scopes.filter({ $0.0 == .pinned || $0.0 == .locked }).isEmpty {
+        Section {
+          ForEach(model.scopes.filter { $0.0 == .pinned || $0.0 == .locked },
+                  id: \.0) { entry in
+            Label(entry.1, systemImage: entry.0 == .pinned ? "pin.fill" : "lock.fill")
+              .tag(entry.0)
+          }
+        }
+      }
+
+      Section("Collections") {
+        ForEach(model.scopes.filter { if case .collection = $0.0 { true } else { false } },
+                id: \.0) { entry in
+          Label(entry.1, systemImage: "folder")
+            .tag(entry.0)
+            .contextMenu {
+              Button("Rename…") {
+                if case .collection(let id) = entry.0 { onRenameCollection(id) }
+              }
+              Button("Delete", role: .destructive) {
+                if case .collection(let id) = entry.0 { onDeleteCollection(id) }
+              }
+            }
+        }
+        Button {
+          onCreateCollection()
+        } label: {
+          Label("New Collection…", systemImage: "plus")
+        }
+        .buttonStyle(.plain)
+      }
+    }
+    .listStyle(.sidebar)
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      Button {
+        sidebarVisible = false
+      } label: {
+        Label("Hide Collections", systemImage: "sidebar.left")
+          .font(.caption)
+      }
+      .buttonStyle(.plain)
+      .padding(6)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+
+  @State private var sidebarVisible = true
+
+  private var scopeBinding: Binding<PanelModel.Scope> {
+    Binding(
+      get: { model.scope },
+      set: { model.selectScope($0) }
+    )
   }
 
   private var searchField: some View {
@@ -71,7 +141,7 @@ struct ClipListView: View {
   private var list: some View {
     ScrollViewReader { proxy in
       List(selection: selectionBinding) {
-        ForEach(model.items) { item in
+        ForEach(model.visibleItems) { item in
           ClipRow(item: item)
             .tag(item.id)
             .contextMenu { contextMenu(for: item) }
@@ -119,10 +189,10 @@ struct ClipListView: View {
 
   private var footer: some View {
     HStack(spacing: 12) {
-      Text("\(model.items.count) items")
+      Text("\(model.visibleItems.count) of \(model.items.count)")
         .font(.caption)
         .foregroundStyle(.secondary)
-      if model.items.count > 0 {
+      if !model.visibleItems.isEmpty {
         // Destructive, and permanent, so it confirms. It is also a *delete*, not
         // a prune: the tombstones it writes are what stop the other machines in
         // the vault from re-importing everything just cleared.
