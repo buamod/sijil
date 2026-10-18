@@ -16,37 +16,20 @@ final class ClipPanel: NSPanel {
   override var canBecomeMain: Bool { false }
 }
 
-@MainActor
-@Observable
-final class PanelModel {
-  var items: [ClipItem] = []
-  var query = ""
-  var selection: UUID?
-  /// True while the shortcut is held, which switches to quick mode.
-  var isQuickMode = false
-  var didRequestDismiss = false
-
-  var selectedItem: ClipItem? {
-    guard let selection else { return items.first }
-    return items.first { $0.id == selection } ?? items.first
-  }
-
-  func moveSelection(by offset: Int) {
-    guard !items.isEmpty else { return }
-    let current = selection.flatMap { id in items.firstIndex { $0.id == id } } ?? -1
-    let next = min(max(current + offset, 0), items.count - 1)
-    selection = items[next].id
-  }
-}
-
 struct ClipListView: View {
   @Bindable var model: PanelModel
+  var collections: [Collection] = []
   let onCopy: (ClipItem) -> Void
   let onPaste: (ClipItem) -> Void
   let onTogglePin: (ClipItem) -> Void
   let onDelete: (ClipItem) -> Void
   let onSearch: (String) -> Void
   let onDismiss: () -> Void
+  let onTransform: (ClipItem) -> Void
+  let onPreview: (ClipItem) -> Void
+  let onFile: (ClipItem, UUID?) -> Void
+  /// Why the last copy was skipped, if it was.
+  var rejection: CaptureRules.Rejection?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -84,20 +67,12 @@ struct ClipListView: View {
 
   private var list: some View {
     ScrollViewReader { proxy in
-      List(selection: Binding(
-        get: { model.selection },
-        set: { model.selection = $0 }
-      )) {
+      List(selection: selectionBinding) {
         ForEach(model.items) { item in
           ClipRow(item: item)
             .tag(item.id)
-            .contextMenu {
-              Button("Copy") { onCopy(item) }
-              Button("Paste") { onPaste(item) }
-              Button(item.pinned ? "Unpin" : "Pin") { onTogglePin(item) }
-              Divider()
-              Button("Delete", role: .destructive) { onDelete(item) }
-            }
+            .contextMenu { contextMenu(for: item) }
+            .onTapGesture(count: 2) { onPreview(item) }
         }
       }
       .listStyle(.plain)
@@ -108,17 +83,58 @@ struct ClipListView: View {
     }
   }
 
+  /// Extracted because a large view expression inside `List` can trip the
+  /// SwiftUI type-checker's expression-size limit.
+  private var selectionBinding: Binding<UUID?> {
+    Binding(
+      get: { model.selection },
+      set: { model.selection = $0 }
+    )
+  }
+
+  @ViewBuilder
+  private func contextMenu(for item: ClipItem) -> some View {
+    Button("Copy") { onCopy(item) }
+    Button("Paste") { onPaste(item) }
+    Button("Transform…") { onTransform(item) }
+    Button("Preview") { onPreview(item) }
+    Divider()
+    Button(item.pinned ? "Unpin" : "Pin") { onTogglePin(item) }
+    Menu("Add to Collection") {
+      Button("None") { onFile(item, nil) }
+      if !collections.isEmpty { Divider() }
+      ForEach(collections) { collection in
+        Button(collection.name) { onFile(item, collection.id) }
+      }
+    }
+    Divider()
+    Button("Delete", role: .destructive) { onDelete(item) }
+  }
+
   private var footer: some View {
     HStack(spacing: 12) {
       Text("\(model.items.count) items")
         .font(.caption)
         .foregroundStyle(.secondary)
       Spacer()
+      if let rejection = rejectionText {
+        Text(rejection)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
       Button("Close") { onDismiss() }
         .keyboardShortcut(.cancelAction)
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 6)
+  }
+
+  /// Explains why the most recent copy was not recorded, so a skipped clip is
+  /// answerable rather than mysterious.
+  private var rejectionText: String? {
+    guard let reason = rejection else { return nil }
+    return "Not recorded: \(reason)"
   }
 }
 

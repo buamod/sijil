@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var panel: ClipPanel?
   private let panelModel = PanelModel()
   private let hotKey = GlobalHotKey()
+  private let keyMonitor = PanelKeyMonitor()
 
   // MARK: - Menu bar bridging
 
@@ -86,10 +87,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationWillTerminate(_ notification: Notification) {
     hotKey.unregister()
+    keyMonitor.stop()
     Task {
+      // Flush the vault before exiting so nothing pending is lost. The monitor
+      // is already stopped, so no new work can arrive during the flush.
       await service?.stop()
       NSApp.terminate(nil)
     }
+  }
+
+  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    // Menu-bar app: closing a panel must not quit.
+    false
   }
 
   // MARK: - Hotkey
@@ -117,7 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func hotKeyReleased() {
     guard panelModel.isQuickMode else { return }
-    // Quick mode: releasing the shortcut commits the highlighted item.
+    // Quick Mode: holding the shortcut shows the panel, arrows move the
+    // selection, and letting go pastes whatever is highlighted.
     panelModel.isQuickMode = false
     if let item = panelModel.selectedItem {
       service?.paste(item)
@@ -125,11 +135,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  /// Panel-local key handling. A local monitor needs no Accessibility grant,
+  /// so this works before the user has granted anything.
+  private func startKeyMonitor() {
+    keyMonitor.start { [weak self] action in
+      guard let self else { return }
+      handle(action)
+    }
+  }
+
+  private func handle(_ action: PanelKeyMonitor.Action) {
+    switch action {
+    case .moveSelection(let offset):
+      panelModel.moveSelection(by: offset)
+
+    case .copySelection, .pasteSelection:
+      guard let item = panelModel.selectedItem else { return }
+      if action == .pasteSelection {
+        service?.paste(item)
+      } else {
+        service?.copy(item)
+      }
+      hidePanel()
+
+    case .copySelectionPlain, .pasteSelectionPlain:
+      guard let item = panelModel.selectedItem else { return }
+      if action == .pasteSelectionPlain {
+        service?.paste(item, plainTextOnly: true)
+      } else {
+        service?.copy(item, plainTextOnly: true)
+      }
+      hidePanel()
+
+    case .togglePinSelection:
+      guard let item = panelModel.selectedItem else { return }
+      service?.togglePin(item)
+      if let service { panelModel.replaceItems(service.items) }
+
+    case .deleteSelection:
+      guard let item = panelModel.selectedItem else { return }
+      service?.delete(item)
+      panelModel.removeItem(item.id)
+
+    case .dismiss:
+      hidePanel()
+
+    case .startSearch:
+      break
+    }
+  }
+
   // MARK: - Panel
 
   private func showPanel() {
     guard let service else { return }
-    panelModel.items = service.items
+    panelModel.replaceItems(service.items)
     panelModel.query = ""
     if panelModel.selection == nil {
       panelModel.selection = service.items.first?.id
@@ -145,16 +205,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // another app holds focus.
     panel.orderFrontRegardless()
     panel.makeKey()
+    startKeyMonitor()
   }
 
   private func hidePanel() {
+    keyMonitor.stop()
     panel?.orderOut(nil)
     panelModel.selection = nil
+  }
+
+  // MARK: - Auxiliary panels
+
+  private var transformPanel: NSPanel?
+  private var previewPanel: NSPanel?
+  private let transformModel = TransformModel()
+
+  private func makeAuxiliaryPanel(
+    hosting view: some View,
+    width: CGFloat,
+    height: CGFloat
+  ) -> NSPanel {
+    let panel = ClipPanel(
+      contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+      styleMask: [.nonactivatingPanel, .fullSizeContentView, .resizable],
+      backing: .buffered,
+      defer: false
+    )
+    panel.isFloatingPanel = true
+    panel.level = .floating
+    panel.hidesOnDeactivate = false
+    panel.backgroundColor = .clear
+    panel.isOpaque = false
+    panel.contentView = NSHostingView(rootView: view)
+    return panel
+  }
+
+  func showTransforms(for item: ClipItem) {
+    transformModel.load(item)
+    if let existing = transformPanel {
+      existing.contentView = NSHostingView(rootView: transformContent())
+    } else {
+      transformPanel = makeAuxiliaryPanel(
+        hosting: transformContent(),
+        width: 720,
+        height: 460
+      )
+    }
+    transformPanel?.center()
+    transformPanel?.orderFrontRegardless()
+    transformPanel?.makeKey()
+  }
+
+  private func transformContent() -> some View {
+    TransformSheet(
+      model: transformModel,
+      onApply: { [weak self] text in
+        // The transformed text becomes a new clip rather than replacing the
+        // original: you usually want to keep what you copied.
+        self?.service?.copyTextAsNewClip(text, derivedFrom: self?.transformModel.item)
+        self?.transformPanel?.orderOut(nil)
+      },
+      onDismiss: { [weak self] in self?.transformPanel?.orderOut(nil) }
+    )
+  }
+
+  func showPreview(for item: ClipItem) {
+    if previewPanel == nil {
+      previewPanel = makeAuxiliaryPanel(
+        hosting: ClipPreviewView(item: item),
+        width: 560,
+        height: 420
+      )
+    } else {
+      previewPanel?.contentView = NSHostingView(rootView: ClipPreviewView(item: item))
+    }
+    previewPanel?.center()
+    previewPanel?.orderFrontRegardless()
+    previewPanel?.makeKey()
   }
 
   private func makePanel() -> ClipPanel? {
     let content = ClipListView(
       model: panelModel,
+      collections: TaskCache.shared.collections,
       onCopy: { [weak self] item in
         self?.service?.copy(item)
         self?.hidePanel()
@@ -172,10 +305,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       onSearch: { [weak self] query in
         guard let self else { return }
         self.service?.search(query)
-        self.panelModel.items = self.service?.items ?? []
-        self.panelModel.selection = self.panelModel.items.first?.id
+        if let service = self.service {
+          self.panelModel.replaceItems(service.items)
+        }
       },
-      onDismiss: { [weak self] in self?.hidePanel() }
+      onDismiss: { [weak self] in self?.hidePanel() },
+      onTransform: { [weak self] item in self?.showTransforms(for: item) },
+      onPreview: { [weak self] item in self?.showPreview(for: item) },
+      onFile: { [weak self] item, id in self?.service?.file(item, into: id) },
+      rejection: service?.lastRejection
     )
 
     let panel = ClipPanel(

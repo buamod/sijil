@@ -16,6 +16,8 @@ public final class ClipboardService {
   private let store: SQLiteClipStore
   private let vault: VaultStore
   private let monitor: PasteboardMonitor
+  public let collections: CollectionStore
+  private let sidecarURL: URL
   private let log = Logger(subsystem: "app.copyz", category: "service")
 
   /// Most recent items, newest first.
@@ -41,6 +43,11 @@ public final class ClipboardService {
       configuration: .init(pollInterval: settings.pollInterval),
       rules: settings.rules
     )
+    // Collections and pin state live in a small sidecar inside the vault, so
+    // they sync through whatever folder the user picked.
+    let sidecarURL = settings.vaultURL.appending(path: ".copyz/sidecar.json")
+    self.sidecarURL = sidecarURL
+    self.collections = CollectionStore(sidecarURL: sidecarURL)
 
     monitor.onEvent = { [weak self] event in
       self?.handle(event)
@@ -55,13 +62,16 @@ public final class ClipboardService {
       // Anything captured before the last quit but never flushed goes out now.
       _ = await vault.flushNow()
       _ = await vault.importFromVault()
+      // Write the sidecar even when empty, so its location is discoverable.
+      await persistCollections()
       vaultError = nil
     } catch {
       vaultError = error.localizedDescription
       log.error("vault prepare failed: \(error.localizedDescription, privacy: .public)")
     }
 
-    items = (try? store.recent(limit: 200, includeUnpinnedOnly: false)) ?? []
+    await refreshCollectionNames()
+    reload()
     monitor.start()
     scheduleMaintenance()
   }
@@ -94,23 +104,83 @@ public final class ClipboardService {
 
   // MARK: - Queries
 
+  /// Current filter on the history list.
+  public enum Filter: Hashable, Sendable {
+    case all
+    case pinned
+    case unfiled
+    case collection(UUID)
+    case kind(ClipKind)
+  }
+
+  public private(set) var filter: Filter = .all
+  /// Snapshot of collection id → name, so filtering stays synchronous.
+  private var collectionNames: [UUID: String] = [:]
+
+  public func setFilter(_ filter: Filter) {
+    self.filter = filter
+    reload()
+  }
+
   public func search(_ query: String) {
     guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-      items = (try? store.recent(limit: 200, includeUnpinnedOnly: false)) ?? []
+      reload()
       return
     }
     do {
-      items = try store.search(query, limit: 200)
+      // Search over the whole history, then narrow to the active filter so a
+      // query is not silently confined to one collection.
+      items = try store.search(query, limit: 500).filter(matches(filter))
     } catch {
       log.error("search failed: \(error.localizedDescription, privacy: .public)")
     }
   }
 
   public func reload() {
-    items = (try? store.recent(limit: 200, includeUnpinnedOnly: false)) ?? []
+    items = ((try? store.recent(limit: 500, includeUnpinnedOnly: false)) ?? [])
+      .filter(matches(filter))
+  }
+
+  private func matches(_ filter: Filter) -> (ClipItem) -> Bool {
+    { item in
+      switch filter {
+      case .all: return true
+      case .pinned: return item.pinned
+      case .unfiled: return item.collection == nil
+      case .kind(let kind): return item.kind == kind
+      case .collection(let id):
+        guard let name = self.collectionNames[id] else { return false }
+        return item.collection == name
+      }
+    }
   }
 
   // MARK: - Actions
+
+  /// Records transformed text as a new clip.
+  ///
+  /// The original is left untouched: the usual intent is to keep what was
+  /// copied *and* have the converted form available, not to lose one to the other.
+  public func copyTextAsNewClip(_ text: String, derivedFrom source: ClipItem?) {
+    let item = ClipItem(
+      sourceBundleID: source?.sourceBundleID,
+      sourceAppName: source?.sourceAppName,
+      contents: [ClipContent(
+        type: PasteboardType.string.rawValue,
+        value: Data(text.utf8)
+      )]
+    )
+    do {
+      let stored = try store.record(item)
+      upsert(stored)
+      Task { await vault.scheduleFlush() }
+    } catch {
+      log.error("transform record failed: \(error.localizedDescription, privacy: .public)")
+    }
+
+    let pasteboard = PasteboardWriter.write(item)
+    if pasteboard { monitor.noteOwnWrite() }
+  }
 
   /// Restores `item` to the pasteboard without pasting.
   @discardableResult
@@ -147,17 +217,64 @@ public final class ClipboardService {
   }
 
   public func togglePin(_ item: ClipItem) {
-    let next = !item.pinned
-    try? store.setPinned(next, id: item.id)
-    if let index = items.firstIndex(where: { $0.id == item.id }) {
-      items[index].pinned = next
-    }
-    // Pin state lives in the note frontmatter, so re-export it.
     Task {
-      if let updated = try? store.item(id: item.id) {
-        await vault.writeNow(updated)
+      let next = await collections.togglePinned(item.id)
+      try? store.setPinned(next, id: item.id)
+      try? await collections.save()
+      if let index = items.firstIndex(where: { $0.id == item.id }) {
+        items[index].pinned = next
       }
     }
+  }
+
+  public func file(_ item: ClipItem, into collectionID: UUID?) {
+    Task {
+      await collections.setCollection(collectionID, clipID: item.id)
+      try? await collections.save()
+
+      // Resolve the name separately: `flatMap` cannot host an async call.
+      var name: String?
+      if let collectionID, let resolved = await collections.collection(id: collectionID) {
+        name = resolved.name
+      }
+      try? store.setCollection(name, id: item.id)
+      if let index = items.firstIndex(where: { $0.id == item.id }) {
+        items[index].collection = name
+      }
+    }
+  }
+
+  public func makeCollection(name: String) async -> Collection {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let collection = await collections.upsert(Collection(name: trimmed))
+    try? await collections.save()
+    await refreshCollectionNames()
+    return collection
+  }
+
+  public func deleteCollection(_ id: UUID) async {
+    await collections.deleteCollection(id)
+    try? await collections.save()
+    await refreshCollectionNames()
+    reload()
+  }
+
+  public func renameCollection(_ id: UUID, to name: String) async {
+    await collections.rename(id, to: name)
+    try? await collections.save()
+    await refreshCollectionNames()
+  }
+
+  public func allCollections() async -> [Collection] {
+    await collections.collections
+  }
+
+  private func refreshCollectionNames() async {
+    let list = await collections.collections
+    collectionNames = Dictionary(
+      uniqueKeysWithValues: list.map { ($0.id, $0.name) }
+    )
+    TaskCache.shared.update(collections: list)
   }
 
   public func delete(_ item: ClipItem) {
@@ -174,6 +291,15 @@ public final class ClipboardService {
 
   public var stats: (count: Int, databaseBytes: Int64) {
     ((try? store.count()) ?? 0, (try? store.byteSize()) ?? 0)
+  }
+
+  /// Persists collections and pin state immediately.
+  ///
+  /// Called after every metadata change: the sidecar is a single small file, and
+  /// leaving it unwritten until an unrelated vault flush would mean a crash
+  /// silently loses pin and collection changes.
+  func persistCollections() async {
+    try? await collections.save()
   }
 
   public func vaultByteSize() async -> Int64 {

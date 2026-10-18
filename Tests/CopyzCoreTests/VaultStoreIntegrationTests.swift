@@ -28,7 +28,7 @@ struct VaultStoreTests {
     defer { cleanup(root) }
     try await vault.prepare()
 
-    try store.record(textItem("export me"))
+    _ = try store.record(textItem("export me"))
     #expect(try store.pendingExport(limit: 10).count == 1)
 
     let written = await vault.flushNow()
@@ -42,7 +42,7 @@ struct VaultStoreTests {
     defer { cleanup(root) }
     try await vault.prepare()
 
-    try store.record(textItem("only once"))
+    _ = try store.record(textItem("only once"))
     _ = await vault.flushNow()
     #expect(await vault.flushNow() == 0)
   }
@@ -53,7 +53,7 @@ struct VaultStoreTests {
     defer { cleanup(root) }
     try await vault.prepare()
 
-    try store.record(textItem("recoverable"))
+    _ = try store.record(textItem("recoverable"))
     _ = await vault.flushNow()
 
     // Simulate losing the index entirely.
@@ -72,7 +72,7 @@ struct VaultStoreTests {
     defer { cleanup(root) }
     try await vault.prepare()
 
-    try store.record(textItem("no duplicates"))
+    _ = try store.record(textItem("no duplicates"))
     _ = await vault.flushNow()
     try store.deleteAll(includingPinned: true)
 
@@ -88,7 +88,7 @@ struct VaultStoreTests {
     try await vault.prepare()
 
     for index in 0..<5 {
-      try store.record(textItem("item \(index)"))
+      _ = try store.record(textItem("item \(index)"))
     }
     _ = await vault.flushNow()
 
@@ -103,7 +103,7 @@ struct VaultStoreTests {
     defer { cleanup(root) }
     try await vault.prepare()
 
-    try store.record(textItem("from vault"))
+    _ = try store.record(textItem("from vault"))
     _ = await vault.flushNow()
     try store.deleteAll(includingPinned: true)
     _ = await vault.importFromVault()
@@ -120,7 +120,7 @@ struct VaultStoreTests {
 
     // The batch size is 200, so this forces the loop to iterate.
     for index in 0..<250 {
-      try store.record(textItem("bulk item \(index)"))
+      _ = try store.record(textItem("bulk item \(index)"))
     }
 
     let written = await vault.flushNow()
@@ -142,7 +142,7 @@ struct VaultStoreTests {
       writer: VaultWriter(rootURL: blocker.appending(path: "Vault", directoryHint: .isDirectory))
     )
 
-    try store.record(textItem("still captured"))
+    _ = try store.record(textItem("still captured"))
     #expect(await vault.flushNow() == 0)
     // The clip is still in SQLite and still queued, which is the point.
     #expect(try store.pendingExport(limit: 10).count == 1)

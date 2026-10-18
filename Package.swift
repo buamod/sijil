@@ -27,7 +27,7 @@ let package = Package(
     ),
     .testTarget(
       name: "CopyzCoreTests",
-      dependencies: ["CopyzCore"]
+      dependencies: ["CopyzCore", "CopyzPaste"]
     ),
   ]
 )
