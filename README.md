@@ -22,7 +22,7 @@ which matters for iCloud's metadata handling.
 ## Build
 
 ```sh
-make test    # 170 unit tests
+make test    # 296 unit tests across two targets
 make app     # builds dist/copyz.app
 make run     # builds and launches
 make install # copies to ~/Applications
@@ -81,7 +81,11 @@ body stays paste-clean.
 | ↑ ↓ | Move selection |
 | esc | Dismiss |
 | ⌘P | Pin / unpin |
+| ⌘L | Lock / unlock (survives Clear History) |
 | delete | Delete selection |
+
+The sidebar filters by All / Pinned / Locked / Collection; collections can be
+created, renamed, and deleted from it.
 
 ## Privacy
 
@@ -93,7 +97,48 @@ Source-app detection is a heuristic — there is no public API for "which app wr
 the pasteboard" — so it is treated as advisory metadata and never used for
 access decisions.
 
-Retention prunes by age and item count, always exempting pinned and filed items.
+Retention prunes by age and item count, always exempting pinned, locked, and filed
+items. Retention is a *local* decision and never emits a tombstone: expiry on one
+machine must not delete anything on another.
+
+### Secrets
+
+Beyond the privacy markers, copies are inspected before they can reach disk:
+
+- Copies from a known password-manager bundle id are dropped outright,
+  independent of content, because their output is a credential essentially
+  without exception.
+- Text is checked for private keys, JWTs, provider API keys, bearer tokens,
+  credential-bearing URLs, database connection strings, Luhn-valid card numbers,
+  and high-entropy assignments to secret-like names.
+
+The trade-off is deliberately **precision over recall**. A false positive silently
+removes something the user meant to keep, from a background service they are not
+looking at, with no way to recover it. A false negative costs one extra stored
+secret. Every rule therefore requires corroborating evidence — a keyword *and* a
+shape, or a checksum that cannot occur by chance — and `.env` placeholders like
+`password=changeme` are explicitly not secrets.
+
+Detection can be turned off in Settings ▸ Privacy.
+
+## Durability
+
+SQLite is authoritative for local state; the vault is a replica that any machine
+can rebuild from.
+
+- **Atomic publication.** A note is written to a dot-prefixed temp file in the
+  destination directory, flushed with `F_FULLFSYNC`, renamed into place, and the
+  directory itself flushed. `Data.write(options: .atomic)` renames but never
+  flushes, so a crash could lose a note the app already considered written.
+- **Write obligations.** Committing a clip also arms its export in the same
+  transaction, so a clip can never exist with no pending vault write. A note that
+  goes missing from disk re-arms rather than implying deletion.
+- **Sound tombstone collection.** Tombstones are not pruned on age. An age-based
+  TTL resurrects deleted data on any replica that was offline longer than it, so
+  each device publishes an acknowledgement watermark and a tombstone is collected
+  only once every known replica has seen it.
+- **`secure_delete = ON`**, so a deleted clip's text does not survive in freed
+  pages, plus periodic `VACUUM` and FTS5 `optimize`.
 
 ## Architecture
 
