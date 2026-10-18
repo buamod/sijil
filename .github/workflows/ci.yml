@@ -29,10 +29,15 @@ env:
   # tests were verified against. Bump deliberately, not accidentally.
   SWIFT_VERSION: "6.2"
 
+# macOS 26, not 15. The app uses SwiftUI's `glassEffect`, which only exists in
+# the macOS 26 SDK — declaring a macOS 15 deployment target while calling it
+# meant the package could not be built at all by an older toolchain, and CI
+# caught that on its first run. `Package.swift` now declares the real floor.
+
 jobs:
   format:
     name: Format
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -47,7 +52,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -83,7 +88,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -111,7 +116,7 @@ jobs:
 
   bundle:
     name: App Bundle
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

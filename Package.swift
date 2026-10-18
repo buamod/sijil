@@ -3,6 +3,11 @@ import PackageDescription
 
 let package = Package(
   name: "copyz",
+  // macOS 15 is the *deployment* target: what the app runs on. Compiling needs a
+  // newer SDK, because the panel uses SwiftUI's `glassEffect`, which only exists in
+  // the macOS 26 SDK. Those are different things — setting this to v26 would build
+  // the tests for macOS 26 and make them unrunnable on a macOS 15 machine, which
+  // is exactly the mistake CI caught on its first run.
   platforms: [.macOS(.v15)],
   products: [
     .library(name: "CopyzCore", targets: ["CopyzCore"]),
