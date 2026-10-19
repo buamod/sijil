@@ -1,4 +1,14 @@
-# copyz
+# Sijil
+
+<div dir="rtl" align="right">
+
+## سِجِل
+
+**نسختك على السجل.**
+
+</div>
+
+**Your clipboard, on the record.**
 
 A clipboard manager for macOS. Native Swift, no server, no subscription, and no
 analytics.
@@ -23,7 +33,7 @@ which matters for iCloud's metadata handling.
 
 ```sh
 make test    # 296 unit tests across two targets
-make app     # builds dist/copyz.app
+make app     # builds dist/Sijil.app
 make run     # builds and launches
 make install # copies to ~/Applications
 ```
@@ -38,7 +48,7 @@ a stable Accessibility grant.
 1. Launch from the menu bar (no Dock icon).
 2. Press **⇧⌘V** to open the history panel. Hold the shortcut, arrow through
    items, and release to paste the highlighted one.
-3. Grant Accessibility when prompted, or copyz falls back to copy-only.
+3. Grant Accessibility when prompted, or sijil falls back to copy-only.
 
 ### Vault location
 
@@ -47,9 +57,9 @@ which needs no permission. Point it at:
 
 | Target | Path |
 |---|---|
-| iCloud Drive | `~/Library/Mobile Documents/com~apple~CloudDocs/Copyz` |
-| Dropbox | `~/Library/CloudStorage/Dropbox/Copyz` |
-| Google Drive | `/Volumes/GoogleDrive/Copyz` |
+| iCloud Drive | `~/Library/Mobile Documents/com~apple~CloudDocs/Sijil` |
+| Dropbox | `~/Library/CloudStorage/Dropbox/Sijil` |
+| Google Drive | `/Volumes/GoogleDrive/Sijil` |
 | Obsidian vault | any vault folder — it is just a folder of Markdown |
 
 ## Note format
@@ -143,10 +153,10 @@ can rebuild from.
 ## Architecture
 
 ```
-CopyzCore/    PasteboardMonitor, extraction, SQLite + FTS5, Markdown vault,
+SijilCore/   PasteboardMonitor, extraction, SQLite + FTS5, Markdown vault,
               transform catalogue, previews, collections
-CopyzPaste/   CGEvent synthetic paste, Carbon global hotkey, panel key monitor
-CopyzApp/     NSPanel shell, SwiftUI views, settings
+SijilPaste/  CGEvent synthetic paste, Carbon global hotkey, panel key monitor
+SijilApp/    NSPanel shell, SwiftUI views, settings
 ```
 
 SQLite and the vault are **dual-written, not master/slave**. SQLite takes every

@@ -1,4 +1,4 @@
-# Continuous integration for copyz.
+# Continuous integration for sijil.
 #
 # Ordered so the cheapest, most-likely-to-fail checks run first: a formatting
 # violation should not cost you a full build, and a release-build failure should
@@ -138,8 +138,8 @@ jobs:
 
       - name: Verify the bundle is well formed
         run: |
-          APP=dist/copyz.app
-          test -x "$APP/Contents/MacOS/copyz"  || { echo "executable missing"; exit 1; }
+          APP=dist/Sijil.app
+          test -x "$APP/Contents/MacOS/sijil"  || { echo "executable missing"; exit 1; }
           test -f "$APP/Contents/Info.plist"     || { echo "Info.plist missing"; exit 1; }
           test -f "$APP/Contents/PkgInfo"         || { echo "PkgInfo missing"; exit 1; }
 

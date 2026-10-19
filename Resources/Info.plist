@@ -5,13 +5,13 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleExecutable</key>
-  <string>copyz</string>
+  <string>sijil</string>
   <key>CFBundleIdentifier</key>
-  <string>app.copyz.mac</string>
+  <string>com.buamod.sijil</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>copyz</string>
+  <string>Sijil</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -31,10 +31,10 @@
   <!-- Needed to synthesise a paste into whatever app the user was using.
        Covers the CGEvent "PostEvent" TCC service, shown under Accessibility. -->
   <key>NSAppleEventsUsageDescription</key>
-  <string>copyz needs Accessibility access to paste clipboard items into the app you were using.</string>
+  <string>sijil needs Accessibility access to paste clipboard items into the app you were using.</string>
 
   <!-- Launch at login via SMAppService. -->
   <key>SMAppServiceUsageDescription</key>
-  <string>copyz records your clipboard history while running.</string>
+  <string>sijil records your clipboard history while running.</string>
 </dict>
 </plist>

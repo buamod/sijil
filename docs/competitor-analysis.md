@@ -123,7 +123,7 @@ Butter  string, blob, itemType, name, color, icon, collectionId, locked,
         appBundleId, appName, appUrl, pbType
 ```
 
-Live table `ZCDCLIPBOARDITEM` mirrors this plus `ZISPINNED`. Two fields `copyz`
+Live table `ZCDCLIPBOARDITEM` mirrors this plus `ZISPINNED`. Two fields `sijil`
 lacks and should adopt: **`ZLOCKED`** (a stronger state than pinned — survives
 clear) and **`ZMARKEDDELETE`** (tombstone for sync, so a delete propagates
 instead of resurrecting on another machine).
@@ -140,13 +140,13 @@ Share").
 It honours the same three `org.nspasteboard.*` privacy markers as Paste, plus
 `com.apple.is-remote-clipboard` for Handoff.
 
-## Where `copyz` differs, and what to change
+## Where `sijil` differs, and what to change
 
 Confirmed by running all three on one identical probe set (plain text, hex
 colour, URL, emoji, Swift code, single file, TIFF image). All three captured
 all seven. Type granularity is equivalent.
 
-| | copyz | Paste | PastePal |
+| | sijil | Paste | PastePal |
 |---|---|---|---|
 | Storage | SQLite + FTS5 trigram | Core Data (SQLite) | Core Data (SQLite) |
 | Dedupe key | order-independent SHA-256 over all typed blobs | MD5 of plain text only | none visible |
@@ -154,7 +154,7 @@ all seven. Type granularity is equivalent.
 | Portability | Markdown vault, any sync folder | CloudKit only | CloudKit/CloudDocuments |
 | Analytics | none | PostHog + Sentry | none |
 
-Genuinely better in `copyz`, and worth keeping:
+Genuinely better in `sijil`, and worth keeping:
 - **Dedupe is stricter.** SHA-256 over the typed blob set catches a copy whose
   types changed but text did not, which MD5-of-plain-text cannot. The
   order-independent sort also survives a source app reordering its type list.
