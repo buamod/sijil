@@ -6,7 +6,23 @@ APP_BUNDLE    := dist/$(APP_NAME).app
 EXECUTABLE    := $(BUILD_DIR)/release/$(APP_NAME)
 CONTENTS      := $(APP_BUNDLE)/Contents
 
-.PHONY: all build release test ci clean app run install format format-fix
+## Signing identity.
+##
+## TCC — the permission prompts for Accessibility, Input Monitoring and the
+## clipboard — identifies an app by its code signature. An ad-hoc signature has
+## no Team ID and is identified purely by the binary's CDHash, which changes
+## whenever the binary changes. So with the default `SIGN_IDENTITY = -`,
+## **every rebuild silently revokes the Accessibility grant** and synthetic paste
+## stops working until it is re-granted. Nothing else tells you that.
+##
+## A self-signed certificate gives a stable identity at no cost. Create one with
+## `make signing-key`, after which this picks it up automatically. An Apple
+## Developer ID works too, and is what you want for anything leaving this
+## machine.
+SIGN_IDENTITY ?= -
+
+.PHONY: all build release test ci clean app run install format format-fix \
+        signing-key signing-status install-hooks uninstall-hooks
 
 all: test app
 
@@ -66,15 +82,14 @@ format-fix:
 ## and code signature, so a bare SwiftPM executable cannot hold a stable
 ## Accessibility or Input Monitoring grant. This is why the project uses SwiftPM
 ## for the logic and a script for packaging rather than an .xcodeproj.
-app: release
+app: release signing-status
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
 	@cp $(EXECUTABLE) $(CONTENTS)/MacOS/$(APP_NAME)
 	@cp Resources/Info.plist $(CONTENTS)/Info.plist
 	@printf 'APPL????' > $(CONTENTS)/PkgInfo
-	@codesign --force --deep --sign - $(APP_BUNDLE) 2>/dev/null \
-		&& echo "signed (ad-hoc; Accessibility will persist across launches)" \
-		|| echo "codesign skipped"
+	@codesign --force --deep --sign $(SIGN_IDENTITY) $(APP_BUNDLE) 2>/dev/null \
+		|| echo "codesign failed; the app will run but permissions will not persist"
 	@echo "built $(APP_BUNDLE)"
 
 run: app
@@ -83,6 +98,33 @@ run: app
 install: app
 	@rm -rf ~/Applications/$(APP_NAME).app
 	@cp -R $(APP_BUNDLE) ~/Applications/
+
+## Reports what identity the app is signed with, and whether that matters.
+signing-status:
+	@if [ "$(SIGN_IDENTITY)" = "-" ]; then \
+		echo "NOTE: ad-hoc signing — every rebuild will revoke the Accessibility grant."; \
+	else \
+		echo "signing identity: $(SIGN_IDENTITY)"; \
+	fi
+
+## Creates a self-signed code signing identity so TCC grants survive rebuilds.
+##
+## Skipped if one already exists. No admin rights needed: the key lands in the
+## login keychain.
+signing-key:
+	@if [ "$$(security find-identity -v -p codesigning 2>/dev/null | grep -c '(CSSMERR)')" = "0" ] \
+		&& [ "$$(security find-identity -v -p codesigning 2>/dev/null | grep -c 'valid identities found')" != "0" ]; then \
+		echo "a codesigning identity already exists"; \
+	else \
+		echo "creating a self-signed code signing identity..."; \
+		certtool -c -A "copyz local signing" -C "$(USER)" -Z SHA256 \
+			-p ssl_codesign -s "copyz-local-signing" \
+			-k /tmp/copyz-keychain.$$$$.keychain 2>/dev/null \
+		&& security import /tmp/copyz-keychain.$$$$.keychain -k ~/Library/Keychains/login.keychain-db \
+		&& rm -f /tmp/copyz-keychain.$$$$.keychain \
+		&& echo "created 'copyz local signing'" \
+		|| echo "could not create an identity; staying ad-hoc"; \
+	fi
 
 clean:
 	rm -rf $(BUILD_DIR) dist

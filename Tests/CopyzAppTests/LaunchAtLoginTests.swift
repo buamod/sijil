@@ -137,3 +137,78 @@ struct SettingsTests {
     #expect(settings.vaultURL.path == "/tmp/copyz-vault")
   }
 }
+
+/// copyz identifies itself to macOS by its code signature, and TCC ties the
+/// Accessibility grant to it. With ad-hoc signing that means a rebuild looks
+/// like a different app and the grant is revoked — which looks like "paste
+/// randomly stopped working" unless something says otherwise.
+@Suite("Signature identity")
+struct SignatureIdentityTests {
+  private func isolatedDefaults() -> UserDefaults {
+    let suite = "copyz.sig.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defaults.removePersistentDomain(forName: suite)
+    return defaults
+  }
+
+  @Test("The first launch reports no change")
+  func firstLaunchHasNoBaseline() {
+    let defaults = isolatedDefaults()
+    #expect(SignatureIdentity.recordLaunch(defaults: defaults, digest: "abc123") == .none)
+  }
+
+  @Test("Recording the same signature twice reports no change")
+  func repeatedLaunchIsUnchanged() {
+    let defaults = isolatedDefaults()
+    #expect(SignatureIdentity.recordLaunch(defaults: defaults, digest: "abc123") == .none)
+    #expect(SignatureIdentity.recordLaunch(defaults: defaults, digest: "abc123") == .unchanged)
+  }
+
+  @Test("A different signature is reported as a change")
+  func differentSignatureIsAChange() {
+    let defaults = isolatedDefaults()
+    defaults.set("deadbeef-not-a-real-cdhash", forKey: "lastSeenCodeSignature")
+
+    #expect(SignatureIdentity.recordLaunch(defaults: defaults, digest: "abc123") == .changed)
+  }
+
+  @Test("The recorded digest is updated so the change is reported once")
+  func changeIsReportedOnce() {
+    let defaults = isolatedDefaults()
+    defaults.set("deadbeef-not-a-real-cdhash", forKey: "lastSeenCodeSignature")
+
+    #expect(SignatureIdentity.recordLaunch(defaults: defaults, digest: "abc123") == .changed)
+    // Second launch: the new digest is the baseline now, so no repeat nagging.
+    #expect(SignatureIdentity.recordLaunch(defaults: defaults, digest: "abc123") == .unchanged)
+  }
+
+  @Test("An unreadable signature never claims a change")
+  func unreadableSignatureIsSafe() {
+    // The test process is not the signed bundle, so this is the real code path
+    // when SecStaticCode fails. Claiming a change we cannot substantiate would
+    // nag every launch.
+    let defaults = isolatedDefaults()
+    defaults.set("deadbeef", forKey: "lastSeenCodeSignature")
+    #expect(SignatureIdentity.recordLaunch(defaults: defaults, digest: nil) == .none)
+  }
+
+  @Test("Only a real change produces a message")
+  func explanationOnlyForChanges() {
+    #expect(SignatureIdentity.explanation(for: .none) == nil)
+    #expect(SignatureIdentity.explanation(for: .unchanged) == nil)
+    #expect(SignatureIdentity.explanation(for: .changed)?.isEmpty == false)
+  }
+
+  @Test("The ad-hoc explanation names the actual cause and the fix")
+  func adHocExplanationIsActionable() throws {
+    guard SignatureIdentity.isAdHoc else {
+      Issue.record("this build is not ad-hoc signed; the message differs")
+      return
+    }
+    let message = try #require(SignatureIdentity.explanation(for: .changed))
+    // The whole point is that the user knows *why* paste stopped working.
+    #expect(message.contains("Accessibility"))
+    #expect(message.contains("rebuild"))
+    #expect(message.contains("make signing-key"))
+  }
+}
