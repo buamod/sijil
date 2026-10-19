@@ -69,6 +69,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     service ?? ClipboardService.unavailable(settings: settings)
   }
 
+  /// Warns when a rebuild has silently revoked the Accessibility grant.
+  ///
+  /// Ad-hoc signing identifies the app by CDHash, so a new build looks like a
+  /// different app to macOS. Nothing else tells the user why pasting stopped
+  /// working, and "re-grant Accessibility" is not an obvious next step when you
+  /// were only trying to pick up a fix.
+  private func checkForSignatureChange() {
+    let change = SignatureIdentity.recordLaunch()
+    guard let explanation = SignatureIdentity.explanation(for: change) else { return }
+    presentError(SignatureChangedError(explanation))
+  }
+
   func skipNextCopy() { service?.skipNextCopy() }
   func flushVault() { Task { await service?.flushVault() } }
   func rebuildVault() { Task { await service?.rebuildFromVault() } }
@@ -105,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     installHotKey()
     checkPasteboardAccess()
+    checkForSignatureChange()
 
     // `copyz --settings` opens preferences directly. A menu-bar app has no
     // window to fall back on, so a broken or hidden menu bar item otherwise
@@ -506,6 +519,14 @@ private struct PasteboardAccessApproval: LocalizedError {
     "macOS may ask for permission to read the clipboard. Allow it in System Settings "
       + "▸ Privacy & Security ▸ Paste from Other Apps."
   }
+}
+
+/// Carries the signature-change explanation verbatim, which is why it wraps a
+/// string rather than computing one.
+private struct SignatureChangedError: LocalizedError {
+  init(_ message: String) { self.message = message }
+  private let message: String
+  var errorDescription: String? { message }
 }
 
 /// Shown when `showSettingsWindow:` has no receiver.
