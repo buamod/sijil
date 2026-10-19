@@ -33,6 +33,24 @@ build-and-test:
 	@echo "==> tests"
 	swift test
 
+## Installs a pre-push hook that runs the CI gates.
+##
+## GitHub's branch protection and rulesets both require a paid plan for a private
+## repository, so server-side enforcement is not available here. This is the gate
+## that works regardless: it runs the same checks on the same commits that will
+## reach GitHub, locally, before the push happens.
+install-hooks:
+	@mkdir -p .git/hooks
+	@cp scripts/pre-push .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
+	@echo "installed .git/hooks/pre-push"
+	@echo "remove with: rm .git/hooks/pre-push"
+
+## Removes the pre-push hook.
+uninstall-hooks:
+	@rm -f .git/hooks/pre-push
+	@echo "removed .git/hooks/pre-push"
+
 ## Formatting is checked in CI, so check it before pushing rather than after.
 format:
 	swift format lint --recursive --strict Sources Tests

@@ -1,0 +1,48 @@
+#!/bin/sh
+#
+# Pre-push gate for copyz.
+#
+# Runs the same checks CI runs, on the same commits, before they leave the
+# machine. This exists because GitHub's branch protection and rulesets both
+# require a paid plan for a private repository, so there is no server-side
+# enforcement available on the free plan.
+#
+# Install with `make install-hooks`. Remove with `make uninstall-hooks`.
+#
+# Bypass for a genuine emergency with:
+#   git push --no-verify
+#
+# That escape hatch is deliberate. A gate you cannot bypass is a gate that
+# eventually gets uninstalled out of frustration, which is worse than no gate.
+
+set -e
+
+# Only gate pushes that actually change the code. Pushing a tag, or a branch
+# with no new commits, should not cost a full build.
+ZERO=$(git hash-object -t tree /dev/null)
+
+# Collect the commits being pushed.
+if [ "$1" = "origin" ] && [ "$2" = "" ]; then
+  RANGE=$(git rev-list --not --remotes=origin | head -1)
+  [ -z "$RANGE" ] && exit 0
+elif [ -n "$2" ]; then
+  RANGE="$2"
+else
+  # Fall back to anything not on the upstream branch.
+  RANGE=$(git rev-list --not --remotes=origin | head -1)
+  [ -z "$RANGE" ] && exit 0
+fi
+
+echo "pre-push: running the CI gates locally..."
+echo "           (bypass with: git push --no-verify)"
+echo
+
+if ! make ci; then
+  echo
+  echo "pre-push: FAILED. The CI gates did not pass, so nothing was pushed."
+  echo "           Fix the failures above and push again."
+  exit 1
+fi
+
+echo
+echo "pre-push: all gates passed."
