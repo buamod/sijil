@@ -1,9 +1,10 @@
-APP_NAME      := copyz
-BUNDLE_ID     := app.copyz.mac
+BUNDLE_ID     := com.buamod.sijil
 VERSION       := 0.1.0
 BUILD_DIR     := .build
+APP_NAME      := Sijil
+EXECUTABLE_NAME := sijil
 APP_BUNDLE    := dist/$(APP_NAME).app
-EXECUTABLE    := $(BUILD_DIR)/release/$(APP_NAME)
+EXECUTABLE    := $(BUILD_DIR)/release/$(EXECUTABLE_NAME)
 CONTENTS      := $(APP_BUNDLE)/Contents
 
 ## Signing identity.
@@ -85,7 +86,7 @@ format-fix:
 app: release signing-status
 	@rm -rf $(APP_BUNDLE)
 	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
-	@cp $(EXECUTABLE) $(CONTENTS)/MacOS/$(APP_NAME)
+	@cp $(EXECUTABLE) $(CONTENTS)/MacOS/$(EXECUTABLE_NAME)
 	@cp Resources/Info.plist $(CONTENTS)/Info.plist
 	@printf 'APPL????' > $(CONTENTS)/PkgInfo
 	@codesign --force --deep --sign $(SIGN_IDENTITY) $(APP_BUNDLE) 2>/dev/null \
@@ -117,12 +118,12 @@ signing-key:
 		echo "a codesigning identity already exists"; \
 	else \
 		echo "creating a self-signed code signing identity..."; \
-		certtool -c -A "copyz local signing" -C "$(USER)" -Z SHA256 \
-			-p ssl_codesign -s "copyz-local-signing" \
-			-k /tmp/copyz-keychain.$$$$.keychain 2>/dev/null \
-		&& security import /tmp/copyz-keychain.$$$$.keychain -k ~/Library/Keychains/login.keychain-db \
-		&& rm -f /tmp/copyz-keychain.$$$$.keychain \
-		&& echo "created 'copyz local signing'" \
+		certtool -c -A "Sijil local signing" -C "$(USER)" -Z SHA256 \
+			-p ssl_codesign -s "sijil-local-signing" \
+			-k /tmp/sijil-keychain.$$$$.keychain 2>/dev/null \
+		&& security import /tmp/sijil-keychain.$$$$.keychain -k ~/Library/Keychains/login.keychain-db \
+		&& rm -f /tmp/sijil-keychain.$$$$.keychain \
+		&& echo "created 'Sijil local signing'" \
 		|| echo "could not create an identity; staying ad-hoc"; \
 	fi
 

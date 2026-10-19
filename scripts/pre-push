@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Pre-push gate for copyz.
+# Pre-push gate for sijil.
 #
 # Runs the same checks CI runs, on the same commits, before they leave the
 # machine. This exists because GitHub's branch protection and rulesets both

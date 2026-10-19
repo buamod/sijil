@@ -1,4 +1,4 @@
-# Continuous integration for copyz.
+# Continuous integration for sijil.
 #
 # Ordered so the cheapest, most-likely-to-fail checks run first: a formatting
 # violation should not cost you a full build, and a release-build failure should
@@ -57,16 +57,27 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Cache SwiftPM artifacts
+      # Only the dependency checkouts, never the whole .build.
+      #
+      # `.build` also holds Swift's ModuleCache, whose .pcm files embed the
+      # absolute path they were compiled at. Restoring one across a changed
+      # working directory produces "precompiled file was compiled with module
+      # cache path X, but the path is currently Y" and "missing required module
+      # 'SwiftShims'" — which is exactly what renaming the repository did.
+      #
+      # The checkouts are path-independent and the dependency fetch is the slow
+      # network step, so caching just them saves nearly all of the time and
+      # cannot go stale in this way.
+      - name: Cache SwiftPM dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          # Keyed on the resolved dependency graph *and* the toolchain, so a
-          # Package.resolved or Swift version change invalidates the cache rather
-          # than silently building against the wrong version.
-          path: .build
-          key: ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/artifacts
+          key: ${{ runner.os }}-spm-deps-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-
+            ${{ runner.os }}-spm-deps-${{ env.SWIFT_VERSION }}-
 
       - name: Verify toolchain
         run: |
@@ -93,13 +104,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Cache SwiftPM artifacts
+      - name: Cache SwiftPM dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: .build
-          key: ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          # Checkouts only, never the whole .build — see the note in the Build
+          # job. ModuleCache embeds absolute paths and poisons the build when the
+          # working directory changes.
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/artifacts
+          key: ${{ runner.os }}-spm-deps-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-
+            ${{ runner.os }}-spm-deps-${{ env.SWIFT_VERSION }}-
 
       # Deliberately no `make test`: this runs `swift test` directly so a failing
       # gate names the actual failure rather than surfacing through make.
@@ -121,13 +138,19 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Cache SwiftPM artifacts
+      - name: Cache SwiftPM dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: .build
-          key: ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          # Checkouts only, never the whole .build — see the note in the Build
+          # job. ModuleCache embeds absolute paths and poisons the build when the
+          # working directory changes.
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/artifacts
+          key: ${{ runner.os }}-spm-deps-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-${{ env.SWIFT_VERSION }}-
+            ${{ runner.os }}-spm-deps-${{ env.SWIFT_VERSION }}-
 
       # The bundle is assembled by hand-written shell in the Makefile, so it can
       # break in ways `swift build` never sees: a missing Info.plist key, a
@@ -138,8 +161,8 @@ jobs:
 
       - name: Verify the bundle is well formed
         run: |
-          APP=dist/copyz.app
-          test -x "$APP/Contents/MacOS/copyz"  || { echo "executable missing"; exit 1; }
+          APP=dist/Sijil.app
+          test -x "$APP/Contents/MacOS/sijil"  || { echo "executable missing"; exit 1; }
           test -f "$APP/Contents/Info.plist"     || { echo "Info.plist missing"; exit 1; }
           test -f "$APP/Contents/PkgInfo"         || { echo "PkgInfo missing"; exit 1; }
 
